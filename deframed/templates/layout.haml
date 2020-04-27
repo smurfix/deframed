@@ -1,0 +1,46 @@
+<!doctype html>
+%html
+	%head
+		%title
+			  =title
+		%link rel="icon" href="{{ url_for('static', filename='site.ico') }}" type="image/vnd.microsoft.icon"
+		%link rel="shortcut icon" href="{{ url_for('static', filename='site.ico') }}" type="image/vnd.microsoft.icon"
+		%link rel="stylesheet" type="text/css" href="{{ url_for('static', filename='site.css') }}"
+		%script type="text/javascript"
+			window.websocket_token = "{{ websocket_token }}";
+		%script. type="text/javascript" src="{{ url_for('module', filename='msgpack.min.js') }}"
+		%script. type="text/javascript" src="{{ url_for('module', filename='cash.min.js') }}"
+	%body
+
+		%div#header
+			%div.inside
+				%h1.title
+					&nbsp;
+
+			%div#qw_alerts
+					&nbsp;
+							-if error
+								%div.error
+									=error
+							-for category, message in messages
+								%div.flash
+									%div class="{{ category }}"
+										=message
+						%img#logo src="{{ url_for('static', filename='venoris_small.png') }}"
+						=show_menu(menu)
+						
+				-block header
+					&nbsp;
+
+
+		%div#page
+			%div.inside
+				Content will load shortly. Unless you disabled Javacript.
+
+		%div#footer
+			%div.inside
+				.left
+					Busy. Please wait.
+				.right
+					Busy. Please wait.
+
