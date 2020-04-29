@@ -3,10 +3,19 @@
   position: fixed; /* on top of the page content */
   top: 0;
   right: 0;
+  z-index: 3; /* Specify a stack order in case you're using a different order for other elements */
+  opacity: 0.5;
+} 
+#df_spinner {
+  margin-right: 5px;
+  position: fixed; /* on top of the page content */
+  top: 5%;
+  left: 50%;
   z-index: 2; /* Specify a stack order in case you're using a different order for other elements */
   opacity: 0.5;
 } 
 
 footer  { position: absolute; bottom: 0px; width: 100%; font-size: 0.7em; }
+#df_footer > div { padding: 2px; }
 footer div.left { float: left; text-align: left; }
 footer div.right { float: right; text-align: right; } 

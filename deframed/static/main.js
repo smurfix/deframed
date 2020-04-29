@@ -26,17 +26,28 @@ DeFramed.prototype._setupListeners = function(){
 	};
 };
 
-DeFramed.prototype.announce = function(typ,txt){
+DeFramed.prototype.announce = function(typ,txt,timeout){
+	if (txt === undefined) {
+		$(`#df_${typ}`).remove();
+		return;
+	}
 	var a = `
-		<div id="df_announce" class="alert alert-dismissible alert-${typ}" role="alert">
+		<div id="df_${typ}" class="alert alert-dismissible alert-${typ}" role="alert">
 			${txt}
 			<button type="button" class="close" data-dismiss="alert" aria-label="Close">
 				<span aria-hidden="true">&times;</span>
 			</button>
 		</div>
 	`;
-	$("#df_announce").remove();
+	$(`#df_${typ}`).remove();
 	$("#df_alerts").prepend(a);
+	if(timeout > 0.1) {
+		var fo = function() {
+			// $(`#df_${typ}`).fadeOut(1000, function(e) { $(e).remove(); });
+			$(`#df_${typ}`).remove();
+		};
+		setTimeout(fo, timeout*1000);
+	}
 };
 
 DeFramed.prototype._setupWebsocket = function(){
@@ -46,14 +57,10 @@ DeFramed.prototype._setupWebsocket = function(){
 	this.has_error = false;
 	this.backoff = 100;
 	var self = this;
-	var e = document.getElementById("init_alert");
-	if(e) {
-		$(e).hide();
-	}
 
 	this.ws.onclose = function(event){
 		if (self.has_error) { return; }
-		self.announce("error","Connection closed. Retrying soon.");
+		self.announce("danger","Connection closed. Retrying soon.");
 		if(self.backoff < 30000) { self.backoff = self.backoff * 1.5; }
 		setTimeout(function(){
 			self.ws.readyState > 1 && self._setupWebsocket();
@@ -61,7 +68,7 @@ DeFramed.prototype._setupWebsocket = function(){
 	};
 
 	this.ws.onerror = function (event) {
-		self.announce("error","Connection error. Reloading soon.");
+		self.announce("danger","Connection error. Reloading soon.");
 		if(self.backoff < 30000) { self.backoff = self.backoff * 1.5; }
 		self.has_error = true;
 		setTimeout(function(){
@@ -71,9 +78,9 @@ DeFramed.prototype._setupWebsocket = function(){
 
 	this.ws.onmessage = function(event){
 		var m = msgpack.decode(event.data);
-		console.log("IN",m);
 		var action = m[0];
 		m = m[1];
+		console.log("IN",action,m);
 		var p = self["msg_"+action];
 		if (p === undefined) {
 			self.announce("warning",`Unknown message type '${action}'`);
@@ -89,8 +96,10 @@ DeFramed.prototype._setupWebsocket = function(){
 	};
 
 	this.ws.onopen = function (msg) {
+		$("#df_spinner").show();
+		self.announce("danger");
 		self.send("first", {"uuid":window.deframed_uuid, "uuid":self.uuid, "token":self.token});
-		self.announce("info",'Talking to the server');
+		self.announce("info",'Talking to the server. Stand by.');
 	};
 };
 
@@ -118,7 +127,11 @@ DeFramed.prototype.msg_req = function(data) {
 };
 
 DeFramed.prototype.msg_info = function(m) {
-	this.announce(m.level, m.text);
+	this.announce(m.level, m.text, m.timeout);
+	var b = m.busy;
+	if(b === undefined) {}
+	else if(b) { $("#df_spinner").show(); }
+	else { $("#df_spinner").hide(); }
 }
 
 DeFramed.prototype.req_ping = function(m) {
@@ -128,10 +141,14 @@ DeFramed.prototype.req_ping = function(m) {
 }
 
 DeFramed.prototype.msg_ping = function(m) {
-	t = this.token;
 	this.token = m;
 	this.send("pong",m);
 }
+
+DeFramed.prototype.msg_set = function(m) {
+	$("#"+m.id).html(m.content);
+}
+
 
 DeFramed.prototype.req_getattr = function(m) {
 	res = []
@@ -159,7 +176,7 @@ DeFramed.prototype.m_auth_ok = function(m) {
 
 DeFramed.prototype.m_error = function(m) {
 	var d = $("<td/>")
-	d.addClass("error");
+	d.addClass("danger");
 	if ("display" in m) {
 		d.text(m.display);
 	} else {
@@ -168,7 +185,7 @@ DeFramed.prototype.m_error = function(m) {
 };
 
 DeFramed.prototype.m_fail = function(m) {
-	this.announce("error","Disconnected: "+m.message);
+	this.announce("danger","Disconnected: "+m.message);
 	this.ws.close();
 };
 
@@ -221,6 +238,7 @@ DeFramed.prototype._elementActivated = function(action,ele){
 
 $(function() {
 	window.DF = new DeFramed();
+	$("#init_alert").remove();
 
 	$("a").attr("draggable",false);
 	$(window).on('resize',function(){

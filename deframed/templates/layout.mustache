@@ -12,18 +12,23 @@
 	<body>
 
 		<header>
-			<div id="df_header" class="inside">
-				<h1 class="title">{{title}}</h1>
-			</div>
 			<div id="df_alerts">
 				<div id="init_alert" class="alert alert-primary" role="alert">
-					Initializing.
+					Loading. Please wait.
 				</div>
+			</div>
+			<div id="df_spinner" class="spinner-grow text-primary" role="status">
+				<span class="sr-only">
+					Loading…
+				</span>
 			</div>
 		</header>
 
 		<main>
-			<div id="df_main" class="inside container-fluid">
+			<div id="df_header">
+				<h1 class="title">{{title}}</h1>
+			</div>
+			<div id="df_main" class="container-fluid">
 				<noscript>
 					<p>
 						You disabled Javascript.
@@ -37,12 +42,12 @@
 		</main>
 
 		<footer>
-			<div id="df_footer" class="inside">
-				<div class="left">
-					Busy. Please wait.
+			<div id="df_footer">
+				<div id="df_footer_left" class="left">
+					Busy.
 				</div>
-				<div class="right">
-					Busy. Please wait.
+				<div id="df_footer_right" class="right">
+					Busy too.
 				</div>
 			</div>
 		</footer>

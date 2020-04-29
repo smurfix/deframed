@@ -229,17 +229,21 @@ class Worker:
 
     async def msg_first(self, data):
         """
-        Called when the client says Hello.
+        Called when the client is connected and says Hello.
 
         """
-        await self.send_alert("info","So you want to log in?")
         uuid = data.get('uuid')
         if uuid is None or not await self.set_uuid(uuid):
             await self.show_main(token=data['token'])
 
 
-    async def send_alert(self, level, text):
-        await self.send("info", {"level":level, "text":text})
+    async def send_alert(self, level, text, **kw):
+        kw['level'] = level
+        kw['text'] = text
+        await self.send("info", kw)
+
+    async def send_set(self, id, html):
+        await self.send("set", {"id":id,"content":html});
 
     async def ping(self, token, wait=False):
         """
