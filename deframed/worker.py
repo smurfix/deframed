@@ -10,6 +10,8 @@ from .codec import pack, unpack
 from contextvars import ContextVar
 processing = ContextVar("processing", default=None)
 
+import logging
+logger = logging.getLogger(__name__)
 
 class ClientError(RuntimeError):
     def __init__(self, _error, **kw):
@@ -22,72 +24,102 @@ class ClientError(RuntimeError):
     def __str__(self):
         return 'ClientError(%s%s)' % (self.error, "".join(" %s=%r" % (k,v) for k,v in self.args.items()))
 
+_talk_id = 0
 
-class _Talker:
+class Talker:
     """
     This internal class encapsulates the client's websocket connection.
     """
-    def __init__(self, worker, websocket):
-        self.w = worker
+    w = None # Worker
+    _scope = None
+
+    def __init__(self, websocket):
         self.ws = websocket
+        self.w = trio.Event()
         self.n = 1
         self.req = {}
-        self.cancel = lambda:None
 
-    async def run(self):
+        global _talk_id
+        self._id = _talk_id
+        _talk_id += 1
+
+    async def run(self, *, task_status=trio.TASK_STATUS_IGNORED):
         """
         Run the read/write loop on this websocket,
         parallel to some client code.
         """
+        logger.debug("START %d", self._id)
         async with trio.open_nursery() as n:
-            self.cancel = n.cancel_scope.cancel
+            self._scope = n.cancel_scope
             await n.start(self.ws_in)
             await n.start(self.ws_out)
-            await self.w.connected()
+            task_status.started()
 
-    async def ws_in(*, task_status=trio.TASK_STATUS_IGNORED):
+    def cancel(self):
+        if self._scope is None:
+            return
+        self._scope.cancel()
+
+    def attach(self, worker):
+        """
+        Attach this websocket to an existing worker. Used when a client
+        reconnects and presents an existing session ID.
+        """
+        if isinstance(self.w, trio.Event):
+            self.w.set()
+        self.w = worker
+
+    async def ws_in(self, *, task_status=trio.TASK_STATUS_IGNORED):
         """
         Background task for reading from the web socket.
         """
         task_status.started()
+        if isinstance(self.w, trio.Event):
+            await self.w.wait()
         while True:
-            data = await self._ws.receive()
-            action,data = unpack(data)
+            data = await self.ws.receive()
+            data = unpack(data)
+            logger.debug("IN %r",data)
+            action,data = data
             if action == "reply":
                 self._reply(*data)
                 continue
 
             res = getattr(self.w, 'msg_'+action)
-            tk = processing.set((action,n))
+            tk = processing.set((action,data))
             try:
                 await res(data)
             finally:
                 processing.reset(tk)
 
-    async def _reply(self,n,data):
+    async def _reply(self, n, data):
         if isinstance(data,Mapping) and '_error' in data:
             data = ClientError(**data)
         evt,self.req[n] = self.req[n],data
         evt.set()
 
-    async def ws_out(*, task_status=trio.TASK_STATUS_IGNORED):
+    async def ws_out(self, *, task_status=trio.TASK_STATUS_IGNORED):
         """
         Background task for sending to the web socket
         """
         self._send_q, send_q = trio.open_memory_channel(10)
         task_status.started()
+        if isinstance(self.w, trio.Event):
+            await self.w.wait()
         while True:
             action,data = await send_q.receive()
-            data = pack([action,data])
+            data = [action,data]
+            logger.debug("OUT %r",data)
+            data = pack(data)
             await self.ws.send(data)
 
     async def send(self, action,data):
         """
-        Send a message to the client
+        Send a message to the client.
         """
         if action == "req":
             raise RuntimeError("Use '.request' for that!")
-        await self.send_q.put((action,data))
+        await self._send_q.send((action,data))
 
     async def request(self, action,data):
         """
@@ -112,15 +144,18 @@ class _Talker:
             return res
 
 
-
 class Worker:
     """
     This is the base class for a client session. It might be interrupted
     (page reload, network glitch, or whatever).
     """
-    def __init__(self, nursery):
-        self._nursery = nursery
+    _talk = None
+    _scope = None
+
+    def __init__(self, app):
+        self._app = app
         self.uuid = uuid.uuid1()
+        app.clients[self.uuid] = self
 
     async def init(self):
         """
@@ -130,23 +165,52 @@ class Worker:
         """
         pass
 
-    async def talk(self, websocket):
+    async def talk(self, talker, *, task_status=trio.TASK_STATUS_IGNORED):
         """
-        Use this socket to talk.
+        Use this socket to talk. Called by the app.
+
+        The previous websocket is left alone; in fact it may still deliver
+        incoming messages.
+
         """
-        t, self._talk = self._talk, _Talker(self, websocket)
-        if t is not None:
-            t.cancel()
-        try:
-            await self._talk.run()
-        finally:
-            if self._talk is not None and self._talk.ws is websocket:
-                self._talk = None
-                await self.interrupted()
+        talker.attach(self)
+        self._talk = talker
+        self.cancel()
+
+        with trio.CancelScope() as sc:
+            self._scope = sc
+            task_status.started()
+            try:
+                await self.connected()
+            finally:
+                self._scope = None
+
+    def cancel(self):
+        if self._scope is None:
+            return
+        self._scope.cancel()
+
+    async def spawn(self, task, *args):
+        async def _spawn(task, args, *, task_status=trio.TASK_STATUS_IGNORED):
+            task_status.started()
+            try:
+                await task(*args)
+            except Exception:
+                logger.exception("Error in %r %r", task, args)
+        await self.app.main.start(_spawn,task,args)
+        
+
+    async def maybe_disconnect(self, talker):
+        """internal method, only called by the App"""
+        if self._talk is talker:
+            await self.disconnect()
 
     async def disconnect(self):
-        if self._talk is None:
-            return
+        """
+        The client websocket disconnected. This method may not be called
+        when a client reattaches.
+        """
+        self.cancel()
 
     async def getattr(self, **a: Dict[str,List[str]]) -> Dict[str,Optional[List[str]]]:
         """
@@ -168,10 +232,10 @@ class Worker:
         Called when the client says Hello.
 
         """
-        if data['uuid'] != self.uuid:
-            raise RuntimeError(f"UUID error: want {self.uuid} got {data['uuid']}")
         await self.send_alert("info","So you want to log in?")
-        await self.show_main(data['token'])
+        uuid = data.get('uuid')
+        if uuid is None or not await self.set_uuid(uuid):
+            await self.show_main(token=data['token'])
 
 
     async def send_alert(self, level, text):
@@ -197,6 +261,12 @@ class Worker:
         """
         pass
 
+    async def send(self, action, data):
+        await self._talk.send(action,data)
+
+    async def request(self, action, data):
+        return await self._talk.request(action,data)
+
     async def run(self):
         """
         Main code of your application, running in the background.
@@ -205,7 +275,7 @@ class Worker:
         """
         pass
 
-    async def connected(self):
+    async def connected(self, token=None):
         """
         Called when the client connects or reconnects.
 
@@ -213,6 +283,9 @@ class Worker:
         when the current websocket disconnects.
 
         The default does nothing.
+
+        This code runs in the context of the current websocket connection.
+        If you want to start a long-running task, use "self.spawn".
         """
         pass
 
@@ -235,3 +308,27 @@ class Worker:
         anything).
         """
         pass
+
+    def set_uuid(self, uuid) -> bool:
+        """
+        Set this worker's UUID.
+
+        If there already is a worker with that UUID, the current worker
+        (more specifically, its "connected" subtask) is cancelled.
+
+        Use this to attach a websocket to a running worker after
+        exchanging credentials.
+        """
+        if self.uuid == uuid:
+            return False
+        del app.clients[self.uuid]
+        w = app.clients.get(uuid)
+        if w is None:
+            self.uuid = uuid
+            return False
+        else:
+            w.attach(self._talk)
+            self.cancel()
+            return True
+
+

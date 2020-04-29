@@ -8,6 +8,9 @@ What the …
 Deframed is a non-framework for web programming. In fact it is the very
 antithesis of a web framework.
 
+Huh?
+----
+
 The basic idea of building web pages, these days, is to delegate as much as
 possible to the client. The problem is that if you don't want to do that,
 but still like to offer a single-page site to your user, you're on your
@@ -45,6 +48,10 @@ don't need to send redundant data, and rudimentary access to local data to
 store the equivalent of a cookie and to stash templates on the client. Oh
 yes, and some rudimentary DOM manipulation, like adding a class to some
 element.
+
+DeFramed also auto-adds "onclick" handlers to each button and "onsubmit"s
+to each form (assuming they have an ID and no existing handler), so you
+don't have to.
 
 Note the absence of anything that could be interpreted as client-side
 logic, which is why DeFramed is a non-framework.

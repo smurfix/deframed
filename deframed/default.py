@@ -52,9 +52,14 @@ CFG = attrdict(
     data=attrdict( # passed to main template
         title="Test page. Do not test!",
         loc=attrdict(
-            msgpack="/static/ext/msgpack.min.js",
-            cash="/static/ext/cash.min.js",
-            mustache="/static/ext/mustache.min.js",
+            #msgpack="https://github.com/ygoe/msgpack.js/raw/master/msgpack.min.js",
+            msgpack="static/ext/msgpack.min.js",
+            #mustache="https://github.com/janl/mustache.js/raw/master/mustache.min.js",
+            mustache="static/ext/mustache.min.js",
+            bootstrap_css="https://stackpath.bootstrapcdn.com/bootstrap/4.4.1/css/bootstrap.min.css",
+            bootstrap_js="https://stackpath.bootstrapcdn.com/bootstrap/4.4.1/js/bootstrap.min.js",
+            poppler="https://cdn.jsdelivr.net/npm/popper.js@1.16.0/dist/umd/popper.min.js",
+            jquery="https://code.jquery.com/jquery-3.4.1.slim.min.js",
         ),
         static="static", # path
     ),

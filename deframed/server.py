@@ -6,13 +6,13 @@ from quart_trio import QuartTrio as Quart
 from hypercorn.config import Config as HyperConfig
 from hypercorn.trio import serve as hyper_serve
 from quart.logging import create_serving_logger
-from quart import jsonify, websocket
+from quart import jsonify, websocket, Response
 from quart.static import send_from_directory
 import chevron
 
 from .util import attrdict, combine_dict
 from .default import CFG
-from .worker import Worker
+from .worker import Worker, Talker
 
 from deframed import __file__ as _deframed_path
 
@@ -39,32 +39,31 @@ class App:
         async def index(p):
             mainpage = os.path.join(os.path.dirname(_deframed_path), self.cfg.mainpage)
             with open(mainpage, 'r') as f:
-                return chevron.render(f, self.cfg.data)
+                return Response(chevron.render(f, self.cfg.data),
+                        headers={"Access-Control-Allow-Origin": "*"})
+
 
         @self.app.websocket('/ws')
         async def ws():
-            await self.main.start(self._main, websocket._get_current_object())
+            t = Talker(websocket._get_current_object())
+            w = self.worker(self)
+            await w.init()
+
+            try:
+                async with trio.open_nursery() as n:
+                    await n.start(t.run)
+                    await n.start(w.talk, t)
+            finally:
+                with trio.fail_after(2) as sc:
+                    sc.shield=True
+                    await w.maybe_disconnect(t)
+
 
         static = os.path.join(os.path.dirname(_deframed_path), cfg.data.static)
         @self.app.route("/static/<path:filename>", methods=['GET'])
         async def send_static(filename):
             print("GET",filename)
             return await send_from_directory(static, filename)
-
-    async def _main(self, ws, *, task_status=trio.TASK_STATUS_IGNORED):
-        """
-        """
-        async with trio.open_nursery() as n:
-            w = self.worker(n,ws)
-            await w.init()
-            await n.start(w.ws_in)
-            await n.start(w.ws_out)
-            self.worker[w.uuid] = w
-            try:
-                task_status.started()
-                await w.run()
-            finally:
-                del self.clients[w.uuid]
 
     async def run (self) -> None:
         """
@@ -87,7 +86,8 @@ class App:
         config.use_reloader = cfg.use_reloader
 
         scheme = "http" if config.ssl_enabled is None else "https"
-
-        await hyper_serve(self.app, config)
+        async with trio.open_nursery() as n:
+            self.main = n
+            await hyper_serve(self.app, config)
 
 

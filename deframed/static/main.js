@@ -26,38 +26,76 @@ DeFramed.prototype._setupListeners = function(){
 	};
 };
 
+DeFramed.prototype.announce = function(typ,txt){
+	var a = `
+		<div id="df_announce" class="alert alert-dismissible alert-${typ}" role="alert">
+			${txt}
+			<button type="button" class="close" data-dismiss="alert" aria-label="Close">
+				<span aria-hidden="true">&times;</span>
+			</button>
+		</div>
+	`;
+	$("#df_announce").remove();
+	$("#df_alerts").prepend(a);
+};
+
 DeFramed.prototype._setupWebsocket = function(){
-	var socketUrl = window.location.protocol.replace('http', 'ws') + '//' + window.location.host + '/websocket';
+	var socketUrl = window.location.protocol.replace('http', 'ws') + '//' + window.location.host + '/ws';
 	this.ws = new WebSocket(socketUrl);
+	this.ws.binaryType = 'arraybuffer';
+	this.has_error = false;
+	this.backoff = 100;
 	var self = this;
+	var e = document.getElementById("init_alert");
+	if(e) {
+		$(e).hide();
+	}
 
 	this.ws.onclose = function(event){
 		if (self.has_error) { return; }
-		announce("error","Connection closed. Reloading.");
+		self.announce("error","Connection closed. Retrying soon.");
+		if(self.backoff < 30000) { self.backoff = self.backoff * 1.5; }
 		setTimeout(function(){
 			self.ws.readyState > 1 && self._setupWebsocket();
-		}, 1000);
+		}, self.backoff);
 	};
 
 	this.ws.onerror = function (event) {
-		announce("error","Connection error. Reloading.");
+		self.announce("error","Connection error. Reloading soon.");
+		if(self.backoff < 30000) { self.backoff = self.backoff * 1.5; }
+		self.has_error = true;
 		setTimeout(function(){
 			self.ws.readyState > 1 && self._setupWebsocket();
-		}, 1000);
+		}, self.backoff);
 	};
 
 	this.ws.onmessage = function(event){
 		var m = msgpack.decode(event.data);
-		this["msg_"+m[0]](m[1]);
+		console.log("IN",m);
+		var action = m[0];
+		m = m[1];
+		var p = self["msg_"+action];
+		if (p === undefined) {
+			self.announce("warning",`Unknown message type '${action}'`);
+		} else {
+			try {
+				p.call(self,m);
+				if (self.backoff < 200) { self.backoff = self.backoff / 2; }
+			} catch(e) {
+				console.log(e);
+				self.announce("warning",`Message '${action}' caused error ${e}`)
+			}
+		}
 	};
 
 	this.ws.onopen = function (msg) {
-		self.send("first", {"uuid":window.deframed_uuid, "token":self.token});
-		announce("info",'Initializing …');
+		self.send("first", {"uuid":window.deframed_uuid, "uuid":self.uuid, "token":self.token});
+		self.announce("info",'Talking to the server');
 	};
 };
 
 DeFramed.prototype.send = function(action,data) {
+	console.log("OUT",action,data);
 	if(action == "reply") {
 		console.log("You can't reply here",data);
 	} else {
@@ -71,8 +109,10 @@ DeFramed.prototype.msg_req = function(data) {
 	data=data[2];
 	try {
 		data=this["req_"+action](data);
+		console.log("OUT","reply",n,data);
 		this.ws.send(msgpack.encode(["reply",[n,data]]));
 	} catch(e) {
+		console.log("OUT","reply",n,e,data);
 		this.ws.send(msgpack.encode(["reply",[n,{"_error":e, "action":action, "n":n, "data":data}]]));
 	}
 };
@@ -110,31 +150,10 @@ DeFramed.prototype.req_getattr = function(m) {
 		res[k] = r;
 	});
 	return res;
-
-	this.token = m; this.send("pong",m);
 }
 
-DeFramed.prototype.announce = function(c,m) {
-	// Displays some announcement or other
-	$("#main_info").remove();
-	if (c == "error") {
-		has_error = true;
-	}
-	var li = $('<tr/>');
-	li.attr('id', 'info').addClass(c);
-
-	var ld = $('<th/>');
-	ld.text(c);
-	li.append(ld);
-
-	ld = $('<td/>');
-	ld.text(m);
-	li.append(ld);
-	$('tbody#main_log').prepend(li);
-};
-
 DeFramed.prototype.m_auth_ok = function(m) {
-	announce("info",'Connected. Requesting data.');
+	this.announce("info",'Connected. Requesting data.');
 	this.send("start",null);
 };
 
@@ -149,8 +168,66 @@ DeFramed.prototype.m_error = function(m) {
 };
 
 DeFramed.prototype.m_fail = function(m) {
-	announce("error","Disconnected: "+m.message);
+	this.announce("error","Disconnected: "+m.message);
 	this.ws.close();
 };
 
-$(function() { window.DF = new DeFramed(); })
+
+DeFramed.prototype._augmentInterface = function(){
+	var tags = document.getElementsByTagName('BUTTON');
+	for(var i = 0; i < tags.length; i++){
+		this._augmentButton(tags.item(i));
+	}
+	tags = document.getElementsByTagName('FORM');
+	for(var i = 0; i < tags.length; i++){
+		this._augmentForm(tags.item(i));
+	}
+};
+
+DeFramed.prototype._augmentButton = function(ele){
+	if(!ele.dataset.url){
+		return;
+	}
+	if(ele.onclick){	// already done
+		return;
+	}
+	console.log('augmenting button: ', ele);
+	var self = this;
+	ele.onclick = function(){
+		self.send("button",ele.id);
+	}
+};
+
+DeFramed.prototype._augmentForm = function(ele){
+	if(ele.onsubmit){	// already done
+		return;
+	}
+	console.log('augmenting form: ', ele);
+	var self = this;
+	ele.onsubmit = function(){
+		var res = {"_id":ele.id};
+		for(var e of ele.elements) {
+			res[e.name] = e.value;
+		}
+		self.send("submit",ele);
+		return false;
+	}
+};
+
+DeFramed.prototype._elementActivated = function(action,ele){
+	console.log('element activated:', ele);
+	this.send(action, this._getActionURL(ele));
+};
+
+$(function() {
+	window.DF = new DeFramed();
+
+	$("a").attr("draggable",false);
+	$(window).on('resize',function(){
+		var hh = $('header').height();
+		$('main').offset({top:hh, left:0});
+		hh = $('body').height()-hh-$('footer').height();
+		$('main').height(hh);
+	});
+	$(window).trigger('resize');
+})

@@ -1,34 +1,32 @@
 <!doctype html>
 <html>
 	<head>
-		<title>{{title}}</title>
+		<meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
 		<link rel="icon" href="{{ url_for('static', filename='site.ico') }}" type="image/vnd.microsoft.icon" />
 		<link rel="shortcut icon" href="{{ url_for('static', filename='site.ico') }}" type="image/vnd.microsoft.icon" />
+		<link rel="stylesheet" type="text/css" href="{{ loc.bootstrap_css }}" crossorigin="anonymous" />
 		<link rel="stylesheet" type="text/css" href="static/site.css" />
-		<script type="text/javascript">
-			window.websocket_token = "{{ websocket_token }}";
-		</script>
-		<script type="text/javascript" src="{{ loc.cash }}"></script>
-		<script type="text/javascript" src="{{ loc.msgpack }}" defer></script>
-		<script type="text/javascript" src="{{ loc.mustache }}" defer></script>
-		<script type="text/javascript" src="static/main.js" defer></script>
+
+		<title>{{title}}</title>
 	</head>
 	<body>
 
 		<header>
-			<div class="inside">
+			<div id="df_header" class="inside">
 				<h1 class="title">{{title}}</h1>
 			</div>
 			<div id="df_alerts">
-				<div class="info">Initializing</div>
+				<div id="init_alert" class="alert alert-primary" role="alert">
+					Initializing.
+				</div>
 			</div>
 		</header>
 
 		<main>
-			<div class="inside">
+			<div id="df_main" class="inside container-fluid">
 				<noscript>
 					<p>
-						This page will not load. You disabled Javascript.
+						You disabled Javascript.
 						<br />
 						Sorry, but this site won't work without it!
 						<br />
@@ -37,12 +35,9 @@
 				</noscript>
 			</div>
 		</main>
-		<script>
-			$("main div.inside").html("<p>Content will load shortly.</p>")
-		</script>
 
 		<footer>
-			<div class="inside">
+			<div id="df_footer" class="inside">
 				<div class="left">
 					Busy. Please wait.
 				</div>
@@ -52,5 +47,14 @@
 			</div>
 		</footer>
 
+		<script type="text/javascript" src="{{ loc.jquery }}"></script>
+		<script>
+			$("#df_main").html("<p>Content will load shortly.</p>");
+		</script>
+		<script type="text/javascript" src="{{ loc.poppler }}"crossorigin="anonymous"></script>
+		<script type="text/javascript" src="{{ loc.bootstrap_js }}"crossorigin="anonymous"></script>
+		<script type="text/javascript" src="{{ loc.msgpack }}"crossorigin="anonymous"></script>
+		<script type="text/javascript" src="{{ loc.mustache }}"crossorigin="anonymous"></script>
+		<script type="text/javascript" src="static/main.js"></script>
 	</body>
 </html>
