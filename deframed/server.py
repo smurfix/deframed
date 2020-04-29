@@ -7,6 +7,7 @@ from hypercorn.config import Config as HyperConfig
 from hypercorn.trio import serve as hyper_serve
 from quart.logging import create_serving_logger
 from quart import jsonify, websocket
+from quart.static import send_from_directory
 import chevron
 
 from .util import attrdict, combine_dict
@@ -28,7 +29,10 @@ class App:
         self.clients = {}
         self.worker = worker
 
-        self.app = Quart(cfg.server.name, root_path="/tmp")
+        self.app = Quart(cfg.server.name,
+                # no, we do not want any of those default folders and whatnot
+                static_folder=None,template_folder=None,root_path="/nonexistent",
+                )
 
         @self.app.route("/<path:p>", methods=['GET'])
         @self.app.route("/", defaults={"p":None}, methods=['GET'])
@@ -42,7 +46,10 @@ class App:
             await self.main.start(self._main, websocket._get_current_object())
 
         static = os.path.join(os.path.dirname(_deframed_path), cfg.data.static)
-        self.app.add_url_rule("/static/<path:filename>", static, self.app.send_static_file)
+        @self.app.route("/static/<path:filename>", methods=['GET'])
+        async def send_static(filename):
+            print("GET",filename)
+            return await send_from_directory(static, filename)
 
     async def _main(self, ws, *, task_status=trio.TASK_STATUS_IGNORED):
         """

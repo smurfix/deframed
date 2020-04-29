@@ -14,12 +14,10 @@ setup(
     packages=find_packages(),
     setup_requires=["setuptools_scm", "pytest_runner"],
     install_requires=[
-        "asyncclick",
         "trio >= 0.12",
         "attrs >= 18.2",
-        "asyncclick",
         "chevron",
-        "quart-trio",
+        "quart-trio >= 0.5",
     ],
     tests_require=[
         "pytest",
@@ -39,9 +37,5 @@ setup(
         "Topic :: Software Development :: Testing",
         "License :: OSI Approved :: GNU General Public License v3 (GPLv3)",
     ],
-    entry_points="""
-    [console_scripts]
-    deframe = deframed.command:cmd
-    """,
-    zip_safe=True,
+    zip_safe=False,
 )
