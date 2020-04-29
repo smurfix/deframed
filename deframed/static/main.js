@@ -6,6 +6,7 @@
 
 var DeFramed = function(){
 	this.has_error = false;
+	this.token = null;
 
 	this._setupListeners();
 	this._setupWebsocket();
@@ -47,18 +48,71 @@ DeFramed.prototype._setupWebsocket = function(){
 
 	this.ws.onmessage = function(event){
 		var m = msgpack.decode(event.data);
-		this['msg_'+m.type](m);
+		this["msg_"+m[0]](m[1]);
 	};
 
 	this.ws.onopen = function (msg) {
-		ws.send(msgpack.encode({"type":"login", "token":window.websocket_token}));
+		self.send("first", {"uuid":window.deframed_uuid, "token":self.token});
 		announce("info",'Initializing …');
 	};
 };
 
-DeFramed.prototype.send = function(req) {
-	this.ws.send(msgpack.encode(req));
+DeFramed.prototype.send = function(action,data) {
+	if(action == "reply") {
+		console.log("You can't reply here",data);
+	} else {
+		this.ws.send(msgpack.encode([action,data]));
+	}
 };
+
+DeFramed.prototype.msg_req = function(data) {
+	action=data[0];
+	n=data[1];
+	data=data[2];
+	try {
+		data=this["req_"+action](data);
+		this.ws.send(msgpack.encode(["reply",[n,data]]));
+	} catch(e) {
+		this.ws.send(msgpack.encode(["reply",[n,{"_error":e, "action":action, "n":n, "data":data}]]));
+	}
+};
+
+DeFramed.prototype.msg_info = function(m) {
+	this.announce(m.level, m.text);
+}
+
+DeFramed.prototype.req_ping = function(m) {
+	t = this.token;
+	this.token = m;
+	return t;
+}
+
+DeFramed.prototype.msg_ping = function(m) {
+	t = this.token;
+	this.token = m;
+	this.send("pong",m);
+}
+
+DeFramed.prototype.req_getattr = function(m) {
+	res = []
+
+	Object.keys(m).forEach(k => {
+		var v = m[k];
+		var r = {};
+		var e = document.getElementById(k);
+		if (e === undefined) {
+			res.push(null);
+		} else {
+			for(var kk of v) {
+				r[kk] = e.getAttribute(kk);
+			}
+		}
+		res[k] = r;
+	});
+	return res;
+
+	this.token = m; this.send("pong",m);
+}
 
 DeFramed.prototype.announce = function(c,m) {
 	// Displays some announcement or other
@@ -81,8 +135,7 @@ DeFramed.prototype.announce = function(c,m) {
 
 DeFramed.prototype.m_auth_ok = function(m) {
 	announce("info",'Connected. Requesting data.');
-	req = {"type":"start"};
-	ws.send(msgpack.encode(req));
+	this.send("start",null);
 };
 
 DeFramed.prototype.m_error = function(m) {

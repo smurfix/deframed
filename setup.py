@@ -15,8 +15,11 @@ setup(
     setup_requires=["setuptools_scm", "pytest_runner"],
     install_requires=[
         "asyncclick",
-        "trio >= 0.11",
+        "trio >= 0.12",
         "attrs >= 18.2",
+        "asyncclick",
+        "chevron",
+        "quart-trio",
     ],
     tests_require=[
         "pytest",

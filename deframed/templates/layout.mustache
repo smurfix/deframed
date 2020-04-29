@@ -1,0 +1,56 @@
+<!doctype html>
+<html>
+	<head>
+		<title>{{title}}</title>
+		<link rel="icon" href="{{ url_for('static', filename='site.ico') }}" type="image/vnd.microsoft.icon" />
+		<link rel="shortcut icon" href="{{ url_for('static', filename='site.ico') }}" type="image/vnd.microsoft.icon" />
+		<link rel="stylesheet" type="text/css" href="{{ url_for('static', filename='site.css') }}" />
+		<script type="text/javascript">
+			window.websocket_token = "{{ websocket_token }}";
+		</script>
+		<script type="text/javascript" src="{{ loc.cash }}"></script>
+		<script type="text/javascript" src="{{ loc.msgpack }}" defer></script>
+		<script type="text/javascript" src="{{ loc.mustache }}" defer></script>
+		<script type="text/javascript" src="static/main.js" defer></script>
+	</head>
+	<body>
+
+		<header>
+			<div class="inside">
+				<h1 class="title">{{title}}</h1>
+			</div>
+			<div id="df_alerts">
+				<div class="info">Initializing</div>
+			</div>
+		</header>
+
+		<main>
+			<div class="inside">
+				<noscript>
+					<p>
+						This page will not load. You disabled Javascript.
+						<br />
+						Sorry, but this site won't work without it!
+						<br />
+						(We promise not to do anything nefarious.)
+					</p>
+				</noscript>
+			</div>
+		</main>
+		<script>
+			$("main div.inside").html("<p>Content will load shortly.</p>")
+		</script>
+
+		<footer>
+			<div class="inside">
+				<div class="left">
+					Busy. Please wait.
+				</div>
+				<div class="right">
+					Busy. Please wait.
+				</div>
+			</div>
+		</footer>
+
+	</body>
+</html>
