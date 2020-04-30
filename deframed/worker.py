@@ -6,12 +6,21 @@ import uuid
 import trio
 from typing import Optional,Dict,List
 from .codec import pack, unpack
+from functools import partial
 
 from contextvars import ContextVar
 processing = ContextVar("processing", default=None)
 
 import logging
 logger = logging.getLogger(__name__)
+
+
+class UnknownActionError(RuntimeError):
+    """
+    The client sent a message which I don't understand.
+    """
+    pass
+
 
 class ClientError(RuntimeError):
     def __init__(self, _error, **kw):
@@ -23,6 +32,7 @@ class ClientError(RuntimeError):
 
     def __str__(self):
         return 'ClientError(%s%s)' % (self.error, "".join(" %s=%r" % (k,v) for k,v in self.args.items()))
+
 
 _talk_id = 0
 
@@ -85,7 +95,10 @@ class Talker:
                 self._reply(*data)
                 continue
 
-            res = getattr(self.w, 'msg_'+action)
+            try:
+                res = getattr(self.w, 'msg_'+action)
+            except AttributeError:
+                res = partial(self.any_msg,action)
             tk = processing.set((action,data))
             try:
                 await res(data)
@@ -148,9 +161,15 @@ class Worker:
     """
     This is the base class for a client session. It might be interrupted
     (page reload, network glitch, or whatever).
+
+    The worker's read loop calls ``.msg_{action}`` methods with the
+    incoming message. Code in those methods must not call ``.request``
+    because that would cause a deadlock. (Don't worry, DeFramed catches
+    those.) Start a separate task with ``.spawn`` if you need to do this.
     """
     _talk = None
     _scope = None
+    _nursery = None
 
     def __init__(self, app):
         self._app = app
@@ -165,7 +184,7 @@ class Worker:
         """
         pass
 
-    async def talk(self, talker, *, task_status=trio.TASK_STATUS_IGNORED):
+    async def attach(self, talker):
         """
         Use this socket to talk. Called by the app.
 
@@ -175,29 +194,46 @@ class Worker:
         """
         talker.attach(self)
         self._talk = talker
-        self.cancel()
 
-        with trio.CancelScope() as sc:
-            self._scope = sc
-            task_status.started()
-            try:
-                await self.connected()
-            finally:
-                self._scope = None
+
+    async def talk(self):
+        """
+        Connection-specific main code. The default does nothing.
+
+        This task will get cancelled when the websocket terminates.
+        """
+        pass
 
     def cancel(self):
         if self._scope is None:
             return
         self._scope.cancel()
 
-    async def spawn(self, task, *args):
+    async def spawn(self, task, *args, persistent=True, log_exc=True):
+        """
+        Start a new task. Returns a cancel scope which you can use to stop
+        the task.
+
+        By default, the task persists even if the client websocket
+        reconnects. Set ``persistent=False`` if you don't want that.
+
+        By default, errors get logged but don't propagate. Set ``log_exc=False``
+        if you don't want that. Or set "log_exc" to the exception, or list of
+        exceptions, you want to have logged.
+        """
         async def _spawn(task, args, *, task_status=trio.TASK_STATUS_IGNORED):
-            task_status.started()
-            try:
-                await task(*args)
-            except Exception:
-                logger.exception("Error in %r %r", task, args)
-        await self.app.main.start(_spawn,task,args)
+            with trio.CancelScope() as sc:
+                task_status.started(sc)
+                try:
+                    await task(*args)
+                except Exception as exc:
+                    if log_exc is False:
+                        raise
+                    if log_exc is not True and not isinstance(exc, log_exc):
+                        raise
+                    logger.exception("Error in %r %r", task, args)
+
+        await (self.app.main if persistent else self._nursery).start(_spawn,task,args)
         
 
     async def maybe_disconnect(self, talker):
@@ -230,7 +266,6 @@ class Worker:
     async def msg_first(self, data):
         """
         Called when the client is connected and says Hello.
-
         """
         uuid = data.get('uuid')
         if uuid is None or not await self.set_uuid(uuid):
@@ -265,33 +300,57 @@ class Worker:
         """
         pass
 
+    async def any_msg(self, action, data):
+        """
+        Catch-all for unknown messages, i.e. the 'msg_{action}' handler
+        does not exist.
+
+        The default raises an UnknownActionException.
+        """
+        raise RuntimeError("")
+
     async def send(self, action, data):
+        """
+        Send a message to the client.
+
+        Does not wait for a reply.
+        """
         await self._talk.send(action,data)
 
     async def request(self, action, data):
+        """
+        Send a request to the client.
+
+        Returns the reply, or raises an error.
+        """
         return await self._talk.request(action,data)
 
-    async def run(self):
+    async def run(self, websocket):
         """
-        Main code of your application, running in the background.
+        Main entry point. Takes a websocket, sets up everything, then calls
+        ".talk".
 
-        It's OK for this to be empty.
+        You probably don't want to override this. Your main code should be
+        in ".talk", your setup code in ".init".
         """
-        pass
+        t = Talker(websocket)
+            
+        try:
+            async with trio.open_nursery() as n:
+                self._nursery = n
+                await n.start(t.run)    
+                await self.attach(t)
+                with trio.CancelScope() as sc:
+                    self._scope = sc
+                    try:
+                        await self.talk()
+                    finally:
+                        self._scope = None
+        finally:
+            with trio.fail_after(2) as sc:
+                sc.shield=True
+                await self.maybe_disconnect(t)
 
-    async def connected(self, token=None):
-        """
-        Called when the client connects or reconnects.
-
-        This async function doesn't need to return. It will get cancelled
-        when the current websocket disconnects.
-
-        The default does nothing.
-
-        This code runs in the context of the current websocket connection.
-        If you want to start a long-running task, use "self.spawn".
-        """
-        pass
 
     async def interrupted(self):
         """

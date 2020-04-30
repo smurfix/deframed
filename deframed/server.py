@@ -37,26 +37,16 @@ class App:
         @self.app.route("/<path:p>", methods=['GET'])
         @self.app.route("/", defaults={"p":None}, methods=['GET'])
         async def index(p):
+            # "path" is unused, the app will get it via Javascript
             mainpage = os.path.join(os.path.dirname(_deframed_path), self.cfg.mainpage)
             with open(mainpage, 'r') as f:
                 return Response(chevron.render(f, self.cfg.data),
                         headers={"Access-Control-Allow-Origin": "*"})
 
-
         @self.app.websocket('/ws')
         async def ws():
-            t = Talker(websocket._get_current_object())
             w = self.worker(self)
-            await w.init()
-
-            try:
-                async with trio.open_nursery() as n:
-                    await n.start(t.run)
-                    await n.start(w.talk, t)
-            finally:
-                with trio.fail_after(2) as sc:
-                    sc.shield=True
-                    await w.maybe_disconnect(t)
+            await w.run(websocket._get_current_object())
 
 
         static = os.path.join(os.path.dirname(_deframed_path), cfg.data.static)
@@ -70,7 +60,7 @@ class App:
         Run this application.
 
         This is a simple Hypercorn runner.
-        You should use something more elaborate. in a production setting
+        You should probably use something more elaborate in a production setting.
         """
         config = HyperConfig()
         cfg = self.cfg.server
