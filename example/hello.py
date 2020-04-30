@@ -20,16 +20,31 @@ class Work(Worker):
     # version="1.2.3" -- uses DeFramed's version if not set
 
     async def show_main(self, token):
-        await self.send_debug(True)
-        if token != "A1":
-            await self.send_set("df_footer_left", "'Hello' demo example")
-            await self.send_set("df_footer_right", "via DeFramed, the non-framework")
-            await self.send_set("df_main", """
+        if token is None or token == "A0":
+            await self.send_debug(True)
+            await self.put_form(ping=False)
+        elif token == "A1":
+            await self.put_button(ping=False)
+        elif token == "A2":
+            await self.put_done(ping=False)
+        else:
+            await self.send_alert("warning", "The token was "+repr(token), id="bad_token", timeout=10)
+            await self.put_form()
+        await self.send_alert("info", None)
+        await self.send_busy(False)
+
+    async def put_form(self, ping=True):
+        await self.send_set("df_footer_left", "'Hello' demo example")
+        await self.send_set("df_footer_right", "via DeFramed, the non-framework")
+        await self.send_set("df_main", """
 <p>
 This is a toy test program which shows how to talk to your browser.
 </p>
 <p>
 It doesn't do much yet. That will change.
+</p>
+<p>
+First, here's a simple form.
 </p>
 <form id="form1">
     <table id="plugh"></table>
@@ -39,24 +54,32 @@ It doesn't do much yet. That will change.
 </form>
             """)
 
-            f=TestForm()
-            f.id="plugh"
-            fw=TableWidget()
-            await self.send_set("plugh", fw(f))
+        f=TestForm()
+        f.id="plugh"
+        fw=TableWidget()
+        await self.send_set("plugh", fw(f))
 
-            await self.send_alert("info","Ready!", busy=False, timeout=2)
-            await self.ping("A1")
-        else:
-            await self.send_busy(False)
-            await self.send_alert("info", None)
+        await self.send_alert("info","Ready!", busy=False, timeout=2)
+        if ping:
+            await self.ping("A0")
+
+    async def put_button(self,ping=True):
+        await self.send_set("df_main", "<p>Success. Next, here's a button. <button id=\"butt1\" class=\"btn btn-dark\">Do it!</button></p>")
+        await self.ping("A1")
+
+    async def put_done(self,ping=True):
+        await self.send_set("df_main", "<p>Aww … you pressed the button!</p>")
+        if ping:
+            await self.ping("A2")
+
 
     async def form_form1(self, **kw):
         logger.debug("GOT %r",kw)
-        await self.send_set("df_main", "<p>Success! Yeah! <button id=\"butt1\">Do it!</button></p>")
+        await self.put_button()
 
     async def button_butt1(self, **kw):
         logger.debug("GOT %r",kw)
-        await self.send_set("df_main", "<p>Aww … you pressed the button!</p>")
+        await self.put_done()
 
 
 
@@ -68,7 +91,7 @@ async def main():
     CFG.server.port=50080
 
     logging_config(CFG.logging)
-    app=App(CFG,Work)
+    app=App(CFG,Work, debug=True)
     await app.run()
 trio.run(main)
 

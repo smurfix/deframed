@@ -22,13 +22,14 @@ class App:
 
     You probably don't need to subclass this.
     """
-    def __init__(self, cfg: dict, worker: Worker):
+    def __init__(self, cfg: dict, worker: Worker, debug:bool=False):
         cfg = combine_dict(cfg, CFG, cls=attrdict)
         self.cfg = cfg
         self.main = None # Nursery
         self.clients = {}
         self.worker = worker
         self.version = worker.version or deframed.__version__
+        self.debug=debug or cfg.debug
 
         self.app = Quart(cfg.server.name,
                 # no, we do not want any of those default folders and whatnot
@@ -43,6 +44,7 @@ class App:
             with open(mainpage, 'r') as f:
                 data = cfg.data.copy()
 
+                data['debug'] = self.debug
                 data['version'] = self.version
                 if data['title'] == CFG.data.title:
                     data['title'] = self.worker.title

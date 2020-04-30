@@ -1,10 +1,11 @@
 """
-Base "worker" class that handles client comm
+This module specifies the worker that's responsible for handling
+communication with the client.
 """
 
-import uuid
+from uuid import uuid1,UUID
 import trio
-from typing import Optional,Dict,List,Union
+from typing import Optional,Dict,List,Union,Any
 from .codec import pack, unpack
 from functools import partial
 
@@ -38,7 +39,9 @@ _talk_id = 0
 
 class Talker:
     """
-    This internal class encapsulates the client's websocket connection.
+    This class encapsulates the client's websocket connection.
+
+    It is instantiated by the server. You probably should not touch it.
     """
     w = None # Worker
     _scope = None
@@ -54,8 +57,11 @@ class Talker:
 
     async def run(self, *, task_status=trio.TASK_STATUS_IGNORED):
         """
-        Run the read/write loop on this websocket,
+        Runs the read/write loop on this websocket.
         parallel to some client code.
+
+        This sends the worker's ``fatal_msg`` attribute to the server
+        in a ``fatal`` message if the message reader raises an exception.
         """
         logger.debug("START %d", self._id)
         try:
@@ -64,16 +70,27 @@ class Talker:
                 await n.start(self.ws_in)
                 await n.start(self.ws_out)
                 task_status.started()
-        except Exception as exc:
-            logger.exception("Owch")
-            with trio.move_on_after(2) as s:
-                s.shield = True
-                try:
-                    if self.w:
-                        await self._send("fatal",self.w.fatal_msg)
-                except Exception:
-                    logger.exception("Terminal message")
-                    pass
+        finally:
+            with trio.fail_after(2) as sc:
+                sc.shield=True
+                await self.w.maybe_disconnect(self)
+
+    async def died(self, msg):
+        """
+        Send a "the server has died" message to the client.
+
+        Called from the worker when the connection terminates due to an
+        uncaught error.
+        """
+        logger.exception("Owch")
+        with trio.move_on_after(2) as s:
+            s.shield = True
+            try:
+                if self.w:
+                    await self._send("fatal",msg)
+            except Exception:
+                logger.exception("Terminal message")
+                pass
 
     def cancel(self):
         if self._scope is None:
@@ -183,19 +200,23 @@ class Worker:
     _talk = None
     _scope = None
     _nursery = None
+    _persistent_nursery = None
+    _kill_exc = None
+    _kill_flag = None
 
     title = "You forgot to set a title"
     fatal_msg = "The server had a fatal error.<br />It was logged and will be fixed soon."
     version = None # The server uses DeFramed's version if not set here
 
     def __init__(self, app):
+        self._p_lock = trio.Lock()
         self._app = app
-        self.uuid = uuid.uuid1()
+        self.uuid = uuid1()
         app.clients[self.uuid] = self
 
     async def init(self):
         """
-        Setup code. Call this supermethod when overriding.
+        Setup code. Called by the server for async initialization.
 
         Note that you can't yet talk to the client here!
         """
@@ -205,12 +226,12 @@ class Worker:
         """
         Use this socket to talk. Called by the app.
 
-        The previous websocket is left alone; in fact it may still deliver
-        incoming messages.
-
+        The worker's previous websocket is cancelled.
         """
-        talker.attach(self)
+        if self._talk is not None:
+            self._talk.cancel()
         self._talk = talker
+        talker.attach(self)
 
 
     async def talk(self):
@@ -221,12 +242,17 @@ class Worker:
         """
         pass
 
-    def cancel(self):
+    def cancel(self, persistent=False):
+        if persistent and self._persistent_nursery is not None:
+            self._persistent_nursery.cancel_scope.cancel()
+        if self._scope is not None:
+            self._scope.cancel()
+
         if self._scope is None:
             return
         self._scope.cancel()
 
-    async def spawn(self, task, *args, persistent=True, log_exc=True):
+    async def spawn(self, task, *args, persistent=True):
         """
         Start a new task. Returns a cancel scope which you can use to stop
         the task.
@@ -238,29 +264,26 @@ class Worker:
         if you don't want that. Or set "log_exc" to the exception, or list of
         exceptions, you want to have logged.
         """
-        async def _spawn(task, args, *, task_status=trio.TASK_STATUS_IGNORED):
+        async def _spawn(task, *args, task_status=trio.TASK_STATUS_IGNORED):
             with trio.CancelScope() as sc:
                 task_status.started(sc)
-                try:
-                    await task(*args)
-                except Exception as exc:
-                    if log_exc is False:
-                        raise
-                    if log_exc is not True and not isinstance(exc, log_exc):
-                        raise
-                    logger.exception("Error in %r %r", task, args)
+                await task(*args)
 
-        await (self.app.main if persistent else self._nursery).start(_spawn,task,args)
-        
+        if persistent:
+            await self._run(_spawn,task,*args)
+        else:
+            await self._nursery.start(_spawn,task,*args)
+
 
     async def maybe_disconnect(self, talker):
-        """internal method, only called by the App"""
+        """internal method, called by the Talker"""
         if self._talk is talker:
+            logger.debug("DISCONNECT")
             await self.disconnect()
 
     async def disconnect(self):
         """
-        The client websocket disconnected. This method may not be called
+        The client websocket disconnected. This method might not be called
         when a client reattaches.
         """
         self.cancel()
@@ -333,7 +356,7 @@ class Worker:
         """
         Handle unknown buttons.
 
-        Defaults to raising `UnknownActionError`.
+        If you don't override it, this method raises an `UnknownActionError`.
         """
         raise UnknownActionError(name)
 
@@ -341,7 +364,7 @@ class Worker:
         """
         Handle unknown forms.
 
-        Defaults to raising `UnknownActionError`.
+        If you don't override it, this method raises an `UnknownActionError`.
         """
         raise UnknownActionError(name, data)
 
@@ -363,10 +386,10 @@ class Worker:
 
         The ID of the message is "df_ann_{id}". ``id`` defaults to the
         message type, but you can supply your own.
-        
+
         A message with any given ID replaces the previous one.
         Messages without text are deleted.
-        
+
         Text may contain HTML.
 
         Pass ``timeout`` in seconds to make the message go away by itself.
@@ -375,49 +398,101 @@ class Worker:
         """
         await self.send("info", level=level, text=text, **kw)
 
-    async def send_set(self, id, html):
-        await self.send("set", id=id, content=html);
+    async def send_set(self, id: str, html: str, prepend: Optional[bool]=None):
+        """
+        Set or extend an element's innerHTML content.
+
+        If you set ``prepend`` to `True`, ``html`` will be inserted as
+        the first child node(s) of the modified element. Set to `False`,
+        it will be added at the end.
+
+        Otherwise the old content will be replaced.
+
+        Args:
+          id:
+            the modified HTML element's ID.
+          html:
+            the element's new HTML content.
+          prepend:
+            Flag whether to add the data in front (``True``), back (``False``) or
+            instead of (``None``) the existing content. The default is
+            ``None``.
+        """
+        await self.send("set", id=id, content=html, pre=prepend);
 
     async def send_busy(self, busy: bool):
+        """
+        Show/hide the client's spinner.
+
+        Args:
+          busy:
+            Flag whether to show the spinner.
+        """
         await self.send("busy", busy)
 
     async def send_debug(self, val: Union[bool,str]):
+        """
+        Set/clear the client's debug flag, or log a message on its console.
+
+        While the flag is set, all WebSocket messages are logged on the
+        client's console.
+
+        Args:
+          val:
+            either a `bool` to control the server's debug flag, or a `str`
+            to log a message there.
+        """
         await self.send("debug", val)
 
-    async def ping(self, token, wait=False):
+    async def ping(self, token: str, wait: bool = False) -> Optional[str]:
         """
-        Send a 'ping' to the client. Echoed back by calling 'msg_pong'.
+        Send a 'ping' to the client. Echoed back by calling :meth:`msg_pong`.
 
-        Use this as a sync mechanism, or to measure roundtrip speed.
+        If you set ``wait``, the call is synchronous. The client returns
+        the token's previous value.
 
-        Returns the previous token when waiting, otherwise calls 'msg_pong'
-        with the token you just sent.
+        If you do not set ``wait``, the call returns immediately. The client
+        sends a ``pong`` message back; the content is the current (not the
+        previous) token.
+
+        Args:
+          token:
+            Anything packable, but should probably be a string.
+          wait:
+            Flag whether this call should be synchronous.
         """
         if wait:
             return await self.request("ping", token)
         else:
             await self.send("ping", token)
 
-    async def msg_pong(self, data):
+    async def msg_pong(self, data: Any):
         """
-        Called sometime after you ping the client without waiting.
+        Called by the client, sometime after you ping it asynchronously.
+
+        Args:
+          data:
+            the token value you sent with :meth:`send_ping`.
         """
         pass
 
-    async def any_msg(self, action, data):
+    async def any_msg(self, action: str, data):
         """
         Catch-all for unknown messages, i.e. the 'msg_{action}' handler
         does not exist.
 
-        The default raises an UnknownActionError.
+        If you don't override it, this method raises an UnknownActionError.
+
         """
         raise UnknownActionError(action,data)
 
-    async def send(self, action, data=None, **kw):
+    async def send(self, action:str, data:Any=None, **kw):
         """
         Send a message to the client.
 
-        Does not wait for a reply.
+        This method does not wait for a reply.
+
+        You should probably call one of the specific ``send_*` methods instead.
         """
         if kw:
             if data:
@@ -427,11 +502,14 @@ class Worker:
 
         await self._talk.send(action,data)
 
-    async def request(self, action, data):
+    async def request(self, action:str, data:Any):
         """
         Send a request to the client.
 
         Returns the reply, or raises an error.
+
+        This method is used by `getattr` and `exists`, among others. You
+        probably should use one of these instead of calling this directly.
         """
         return await self._talk.request(action,data)
 
@@ -440,15 +518,16 @@ class Worker:
         Main entry point. Takes a websocket, sets up everything, then calls
         ".talk".
 
-        You probably don't want to override this. Your main code should be
-        in ".talk", your setup code in ".init".
+        You don't want to override this. Your main code should be in
+        `talk`, your setup code (called by the server) in `init`.
         """
         t = Talker(websocket)
-            
+
         try:
             async with trio.open_nursery() as n:
                 self._nursery = n
-                await n.start(t.run)    
+                await n.start(self._kill_wait)
+                await n.start(t.run)
                 await self.attach(t)
                 with trio.CancelScope() as sc:
                     self._scope = sc
@@ -456,33 +535,70 @@ class Worker:
                         await self.talk()
                     finally:
                         self._scope = None
-        finally:
-            with trio.fail_after(2) as sc:
-                sc.shield=True
-                await self.maybe_disconnect(t)
+        except Exception:
+            await t.died(self.fatal_msg)
+            raise
+        # not on BaseException, as in that case we close the connection and
+        # expect the client to try reconnecting
+        else:
+            await t.died(self.fatal_msg)
 
+    async def _kill_wait(self, *, task_status=trio.TASK_STATUS_IGNORED):
+        self._kill_wait = trio.Event()
+        task_status.started()
+        await self._kill_wait.wait()
+        raise RuntimeError("Global task died") from self._kill_exc
+
+    async def _run(self, proc, *args, task_status=trio.TASK_STATUS_IGNORED):
+        """
+        This is the starter for the worker's Websocket-independent nursery.
+
+        If :meth:`spawn` is called with ``persistent`` set, this helper
+        starts a background task off the server's nursery which holds it.
+
+        Exceptions are propagated back to the worker.
+        """
+        async def _work(proc, args, task_status=trio.TASK_STATUS_IGNORED):
+            try:
+                async with trio.open_nursery() as n:
+                    self._persistent_nursery = n
+                    res = await n.start(_work, proc, args)
+                    task_status.started(res)
+            except Exception as exc:
+                self._kill_exc = exc
+                self._kill_flag.set()
+            finally:
+                self._persistent_nursery = None
+
+        if self._persistent_nursery is None:
+            async with self._p_lock:
+                return await self._app.main.start(_work,proc,*args)
+        else:
+            return await self._persistent_nursery.start(proc, *args)
 
     async def interrupted(self):
         """
         Called when the client disconnects.
 
-        This may or may not be called when a cllient reconnects.
+        This may or may not be called when a client reconnects.
         """
         pass
 
-    async def show_main(self, token=None):
+    async def show_main(self, token:str=None):
         """
         Override me to show the main window or whatever.
 
         'token' is the value from the last 'pong'. It is None initially.
-        You can use this to distinguish a client reload (empty main page) 
+        You can use this to distinguish a client reload (empty main page)
         from a websocket reconnect (client state is the same as when you
         sent the last Ping, assuming that you didn't subsequently change
         anything).
+
+        This method may run concurrently with `talk`.
         """
         pass
 
-    def set_uuid(self, uuid) -> bool:
+    def set_uuid(self, uuid:UUID) -> bool:
         """
         Set this worker's UUID.
 
@@ -504,7 +620,7 @@ class Worker:
             return False
         else:
             w.attach(self._talk)
-            self.cancel()
+            self.cancel(True)
             return True
 
 

@@ -6,10 +6,11 @@
 
 var DeFramed = function(){
 	this.has_error = false;
-	this.token = null;
+	this.token = sessionStorage.getItem('token');
+	if (this.token === undefined) this.tiken = null;
 	this.version = null;
 	this.backoff = 100;
-	this.debug = false;
+	this.debug = sessionStorage.getItem('debug');
 
 	this._setupListeners();
 	this._setupWebsocket();
@@ -138,6 +139,7 @@ DeFramed.prototype.msg_req = function(data) {
 DeFramed.prototype.msg_first = function(m) {
 	this.version = m.version;
 	this.uuid = m.uuid;
+	sessionStorage.setItem('token', m.token);
 	this.token = m.token;
 	this.msg_busy(m.busy);
 }
@@ -167,21 +169,29 @@ DeFramed.prototype.msg_debug = function(m) {
 	if(m === true) this.debug=true;
 	else if(m === false) this.debug=false;
 	else { console.log(m); }
+	sessionStorage.setItem('debug', this.debug);
 }
 
 DeFramed.prototype.req_ping = function(m) {
 	t = this.token;
+	sessionStorage.setItem('token', m);
 	this.token = m;
 	return t;
 }
 
 DeFramed.prototype.msg_ping = function(m) {
+	sessionStorage.setItem('token', m);
 	this.token = m;
 	this.send("pong",m);
 }
 
 DeFramed.prototype.msg_set = function(m) {
-	$("#"+m.id).html(m.content);
+	if (m.pre === true)
+		$("#"+m.id).prepend(m.content);
+	else if (m.pre === false)
+		$("#"+m.id).append(m.content);
+	else
+		$("#"+m.id).html(m.content);
 }
 
 

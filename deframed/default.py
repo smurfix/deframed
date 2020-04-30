@@ -49,6 +49,7 @@ CFG = attrdict(
         keyfile=None,
     ),
     mainpage="templates/layout.mustache",
+    debug=False,
     data=attrdict( # passed to main template
         title="Test page. Do not test!",
         loc=attrdict(
