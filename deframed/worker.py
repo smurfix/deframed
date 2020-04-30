@@ -4,7 +4,7 @@ Base "worker" class that handles client comm
 
 import uuid
 import trio
-from typing import Optional,Dict,List
+from typing import Optional,Dict,List,Union
 from .codec import pack, unpack
 from functools import partial
 
@@ -45,7 +45,6 @@ class Talker:
 
     def __init__(self, websocket):
         self.ws = websocket
-        self.w = trio.Event()
         self.n = 1
         self.req = {}
 
@@ -59,11 +58,22 @@ class Talker:
         parallel to some client code.
         """
         logger.debug("START %d", self._id)
-        async with trio.open_nursery() as n:
-            self._scope = n.cancel_scope
-            await n.start(self.ws_in)
-            await n.start(self.ws_out)
-            task_status.started()
+        try:
+            async with trio.open_nursery() as n:
+                self._scope = n.cancel_scope
+                await n.start(self.ws_in)
+                await n.start(self.ws_out)
+                task_status.started()
+        except Exception as exc:
+            logger.exception("Owch")
+            with trio.move_on_after(2) as s:
+                s.shield = True
+                try:
+                    if self.w:
+                        await self._send("fatal",self.w.fatal_msg)
+                except Exception:
+                    logger.exception("Terminal message")
+                    pass
 
     def cancel(self):
         if self._scope is None:
@@ -98,7 +108,7 @@ class Talker:
             try:
                 res = getattr(self.w, 'msg_'+action)
             except AttributeError:
-                res = partial(self.any_msg,action)
+                res = partial(self.w.any_msg,action)
             tk = processing.set((action,data))
             try:
                 await res(data)
@@ -121,10 +131,13 @@ class Talker:
             await self.w.wait()
         while True:
             action,data = await send_q.receive()
-            data = [action,data]
-            logger.debug("OUT %r",data)
-            data = pack(data)
-            await self.ws.send(data)
+            await self._send(action,data)
+
+    async def _send(self, action, data):
+        data = [action,data]
+        logger.debug("OUT %r",data)
+        data = pack(data)
+        await self.ws.send(data)
 
     async def send(self, action,data):
         """
@@ -170,6 +183,10 @@ class Worker:
     _talk = None
     _scope = None
     _nursery = None
+
+    title = "You forgot to set a title"
+    fatal_msg = "The server had a fatal error.<br />It was logged and will be fixed soon."
+    version = None # The server uses DeFramed's version if not set here
 
     def __init__(self, app):
         self._app = app
@@ -263,22 +280,109 @@ class Worker:
         """
         return (await self.getattr({id:{}}))[id] is not None
 
-    async def msg_first(self, data):
+    async def msg_first(self, data) -> bool:
         """
         Called when the client is connected and says Hello.
-        """
-        uuid = data.get('uuid')
-        if uuid is None or not await self.set_uuid(uuid):
-            await self.show_main(token=data['token'])
 
+        This calls ``.show_main``, thus you should override that instead.
+
+        Returns True when the client either has a version mismatch (and is
+        reloaded) or sends a known UUID (and is reassigned).
+        """
+        v = data.get('version')
+        if v is not None and v != self._app.version:
+            await self.send('reload',True)
+            return True
+
+        await self.send_first();
+
+        uuid = data.get('uuid')
+        if uuid is None or not self.set_uuid(uuid):
+            await self.show_main(token=data['token'])
+        else:
+            return True
+
+    async def msg_form(self, data):
+        """
+        Process form submissions.
+
+        The default calls ``.form_{name}(**data)`` or ``.any_form(name,data)``.
+        """
+        name, data = data
+        try:
+            p = getattr(self,"form_"+name)
+        except AttributeError:
+            await self.any_form(name, data)
+        else:
+            await p(**data)
+
+    async def msg_button(self, name):
+        """
+        Process button presses.
+
+        The default calls ``.button_{name}()`` or ``.any_button(name)``.
+        """
+        try:
+            p = getattr(self,"button_"+name)
+        except AttributeError:
+            await self.any_button(name)
+        else:
+            await p()
+
+    async def any_button(self, name):
+        """
+        Handle unknown buttons.
+
+        Defaults to raising `UnknownActionError`.
+        """
+        raise UnknownActionError(name)
+
+    async def any_form(self, name, data):
+        """
+        Handle unknown forms.
+
+        Defaults to raising `UnknownActionError`.
+        """
+        raise UnknownActionError(name, data)
+
+    async def send_first(self):
+        """
+        Send initial data to the client.
+
+        Called by `msg_first`.
+        You probably should not override this.
+        """
+        await self.send("first", version=self._app.version, uuid=str(self.uuid))
 
     async def send_alert(self, level, text, **kw):
-        kw['level'] = level
-        kw['text'] = text
-        await self.send("info", kw)
+        """
+        Send a pop-up message to the client.
+
+        Levels correspond to Bootstrap contexts:
+        primary/secondary/success/danger/warning/info/light/dark.
+
+        The ID of the message is "df_ann_{id}". ``id`` defaults to the
+        message type, but you can supply your own.
+        
+        A message with any given ID replaces the previous one.
+        Messages without text are deleted.
+        
+        Text may contain HTML.
+
+        Pass ``timeout`` in seconds to make the message go away by itself.
+        Messages can also be closed by the user unless you pass a negative
+        timeout.
+        """
+        await self.send("info", level=level, text=text, **kw)
 
     async def send_set(self, id, html):
-        await self.send("set", {"id":id,"content":html});
+        await self.send("set", id=id, content=html);
+
+    async def send_busy(self, busy: bool):
+        await self.send("busy", busy)
+
+    async def send_debug(self, val: Union[bool,str]):
+        await self.send("debug", val)
 
     async def ping(self, token, wait=False):
         """
@@ -305,16 +409,22 @@ class Worker:
         Catch-all for unknown messages, i.e. the 'msg_{action}' handler
         does not exist.
 
-        The default raises an UnknownActionException.
+        The default raises an UnknownActionError.
         """
-        raise RuntimeError("")
+        raise UnknownActionError(action,data)
 
-    async def send(self, action, data):
+    async def send(self, action, data=None, **kw):
         """
         Send a message to the client.
 
         Does not wait for a reply.
         """
+        if kw:
+            if data:
+                kw.update(data)
+            else:
+                data = kw
+
         await self._talk.send(action,data)
 
     async def request(self, action, data):
@@ -381,12 +491,15 @@ class Worker:
 
         Use this to attach a websocket to a running worker after
         exchanging credentials.
+
+        Returns True if the socket has been reassigned.
         """
         if self.uuid == uuid:
             return False
-        del app.clients[self.uuid]
-        w = app.clients.get(uuid)
+        del self._app.clients[self.uuid]
+        w = self._app.clients.get(uuid)
         if w is None:
+            self._app.clients[self.uuid] = self
             self.uuid = uuid
             return False
         else:

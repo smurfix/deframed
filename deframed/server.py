@@ -14,7 +14,7 @@ from .util import attrdict, combine_dict
 from .default import CFG
 from .worker import Worker, Talker
 
-from deframed import __file__ as _deframed_path
+import deframed
 
 class App:
     """
@@ -28,6 +28,7 @@ class App:
         self.main = None # Nursery
         self.clients = {}
         self.worker = worker
+        self.version = worker.version or deframed.__version__
 
         self.app = Quart(cfg.server.name,
                 # no, we do not want any of those default folders and whatnot
@@ -38,9 +39,15 @@ class App:
         @self.app.route("/", defaults={"p":None}, methods=['GET'])
         async def index(p):
             # "path" is unused, the app will get it via Javascript
-            mainpage = os.path.join(os.path.dirname(_deframed_path), self.cfg.mainpage)
+            mainpage = os.path.join(os.path.dirname(deframed.__file__), cfg.mainpage)
             with open(mainpage, 'r') as f:
-                return Response(chevron.render(f, self.cfg.data),
+                data = cfg.data.copy()
+
+                data['version'] = self.version
+                if data['title'] == CFG.data.title:
+                    data['title'] = self.worker.title
+
+                return Response(chevron.render(f, data),
                         headers={"Access-Control-Allow-Origin": "*"})
 
         @self.app.websocket('/ws')
@@ -49,7 +56,7 @@ class App:
             await w.run(websocket._get_current_object())
 
 
-        static = os.path.join(os.path.dirname(_deframed_path), cfg.data.static)
+        static = os.path.join(os.path.dirname(deframed.__file__), cfg.data.static)
         @self.app.route("/static/<path:filename>", methods=['GET'])
         async def send_static(filename):
             print("GET",filename)

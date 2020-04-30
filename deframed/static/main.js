@@ -7,6 +7,9 @@
 var DeFramed = function(){
 	this.has_error = false;
 	this.token = null;
+	this.version = null;
+	this.backoff = 100;
+	this.debug = false;
 
 	this._setupListeners();
 	this._setupWebsocket();
@@ -26,27 +29,35 @@ DeFramed.prototype._setupListeners = function(){
 	};
 };
 
-DeFramed.prototype.announce = function(typ,txt,timeout){
-	if (txt === undefined) {
-		$(`#df_${typ}`).remove();
-		return;
-	}
+DeFramed.prototype.announce = function(typ,txt,timeout,id){
+	if(id === undefined) { id = typ; }
+	var sel = `#df_ann_${id}`;
+
+	var t = $(sel).attr("df_to")
+	if (t) { clearTimeout(t); }
+
+	$(sel).remove();
+	if (txt === undefined || txt === null) { return; }
+
 	var a = `
-		<div id="df_${typ}" class="alert alert-dismissible alert-${typ}" role="alert">
+		<div id="df_ann_${id}" class="alert alert-dismissible alert-${typ}" role="alert">
 			${txt}
+		</div>
+		`;
+	$("#df_alerts").prepend(a);
+	if (!(timeout < 0)) {
+		$(sel).append(`
 			<button type="button" class="close" data-dismiss="alert" aria-label="Close">
 				<span aria-hidden="true">&times;</span>
 			</button>
-		</div>
-	`;
-	$(`#df_${typ}`).remove();
-	$("#df_alerts").prepend(a);
+		`);
+	}
 	if(timeout > 0.1) {
 		var fo = function() {
 			// $(`#df_${typ}`).fadeOut(1000, function(e) { $(e).remove(); });
-			$(`#df_${typ}`).remove();
+			$(sel).remove();
 		};
-		setTimeout(fo, timeout*1000);
+		$(sel).attr("df_to", setTimeout(fo, timeout*1000));
 	}
 };
 
@@ -55,18 +66,17 @@ DeFramed.prototype._setupWebsocket = function(){
 	this.ws = new WebSocket(url);
 	this.ws.binaryType = 'arraybuffer';
 	this.has_error = false;
-	this.backoff = 100;
 	var self = this;
-	console.log("WS START",url);
+	if (this.debug) console.log("WS START",url);
 
 	this.ws.onclose = function(event){
-		console.log("WS CLOSE",event);
+		if (self.debug) console.log("WS CLOSE",event);
 		if (self.has_error) { return; }
-		self.announce("danger","Connection closed.<br />Reload this page to resume.");
+		self.announce("danger","Connection closed.<br /><a class=\"btn btn-outline-danger btn-sm\" href=\"#\" onclick=\"DF._setupWebsocket()\">Click here</a> to reconnect.");
 	};
 
 	this.ws.onerror = function (event) {
-		console.log("WS ERR",event);
+		if (self.debug) console.log("WS ERR",event);
 		self.announce("danger","Connection error. Reloading soon.");
 		if(self.backoff < 30000) { self.backoff = self.backoff * 1.5; }
 		self.has_error = true;
@@ -79,7 +89,7 @@ DeFramed.prototype._setupWebsocket = function(){
 		var m = msgpack.decode(event.data);
 		var action = m[0];
 		m = m[1];
-		console.log("IN",action,m);
+		if (self.debug) console.log("IN",action,m);
 		var p = self["msg_"+action];
 		if (p === undefined) {
 			self.announce("warning",`Unknown message type '${action}'`);
@@ -88,7 +98,7 @@ DeFramed.prototype._setupWebsocket = function(){
 				p.call(self,m);
 				if (self.backoff < 200) { self.backoff = self.backoff / 2; }
 			} catch(e) {
-				console.log(e);
+				if (self.debug) console.log(e);
 				self.announce("warning",`Message '${action}' caused error ${e}`)
 			}
 		}
@@ -97,15 +107,15 @@ DeFramed.prototype._setupWebsocket = function(){
 	this.ws.onopen = function (msg) {
 		$("#df_spinner").show();
 		self.announce("danger");
-		self.send("first", {"uuid":window.deframed_uuid, "uuid":self.uuid, "token":self.token});
+		self.send("first", {"uuid":self.uuid, "token":self.token, "version":window.deframed_version});
 		self.announce("info",'Talking to the server. Stand by.');
 	};
 };
 
 DeFramed.prototype.send = function(action,data) {
-	console.log("OUT",action,data);
+	if (this.debug) console.log("OUT",action,data);
 	if(action == "reply") {
-		console.log("You can't reply here",data);
+		if (this.debug) console.log("You can't reply here",data);
 	} else {
 		this.ws.send(msgpack.encode([action,data]));
 	}
@@ -117,20 +127,46 @@ DeFramed.prototype.msg_req = function(data) {
 	data=data[2];
 	try {
 		data=this["req_"+action](data);
-		console.log("OUT","reply",n,data);
+		if (this.debug) console.log("OUT","reply",n,data);
 		this.ws.send(msgpack.encode(["reply",[n,data]]));
 	} catch(e) {
-		console.log("OUT","reply",n,e,data);
+		if (this.debug) console.log("OUT","reply",n,e,data);
 		this.ws.send(msgpack.encode(["reply",[n,{"_error":e, "action":action, "n":n, "data":data}]]));
 	}
 };
 
+DeFramed.prototype.msg_first = function(m) {
+	this.version = m.version;
+	this.uuid = m.uuid;
+	this.token = m.token;
+	this.msg_busy(m.busy);
+}
+
+DeFramed.prototype.msg_reload = function(m) {
+	location.reload(true);
+}
+
 DeFramed.prototype.msg_info = function(m) {
 	this.announce(m.level, m.text, m.timeout);
-	var b = m.busy;
-	if(b === undefined) {}
-	else if(b) { $("#df_spinner").show(); }
+	this.msg_busy(m.busy);
+}
+
+DeFramed.prototype.msg_fatal = function(m) {
+	this.has_error = true;
+	this.announce("danger",`${m}<br /><a class=\"btn btn-outline-danger btn-sm\" href=\"#\" onclick=\"DF._setupWebsocket()\">Click here</a> to reconnect.`);
+	this.msg_busy(m.busy);
+}
+
+DeFramed.prototype.msg_busy = function(m) {
+	if(m === undefined) {}
+	else if(m) { $("#df_spinner").show(); }
 	else { $("#df_spinner").hide(); }
+}
+
+DeFramed.prototype.msg_debug = function(m) {
+	if(m === true) this.debug=true;
+	else if(m === false) this.debug=false;
+	else { console.log(m); }
 }
 
 DeFramed.prototype.req_ping = function(m) {
@@ -201,10 +237,7 @@ DeFramed.prototype._augmentInterface = function(){
 };
 
 DeFramed.prototype._augmentButton = function(ele){
-	if(!ele.dataset.url){
-		return;
-	}
-	if(ele.onclick){	// already done
+	if(ele.onclick || !ele.id) { // already done
 		return;
 	}
 	console.log('augmenting button: ', ele);
@@ -215,17 +248,19 @@ DeFramed.prototype._augmentButton = function(ele){
 };
 
 DeFramed.prototype._augmentForm = function(ele){
-	if(ele.onsubmit){	// already done
+	if(ele.onsubmit || !ele.id) { // already done
 		return;
 	}
 	console.log('augmenting form: ', ele);
 	var self = this;
 	ele.onsubmit = function(){
-		var res = {"_id":ele.id};
+		var res = {};
 		for(var e of ele.elements) {
-			res[e.name] = e.value;
+			if (e.name) {
+				res[e.name] = e.value;
+			}
 		}
-		self.send("submit",ele);
+		self.send("form",[ele.id,res]);
 		return false;
 	}
 };
