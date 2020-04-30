@@ -51,23 +51,22 @@ DeFramed.prototype.announce = function(typ,txt,timeout){
 };
 
 DeFramed.prototype._setupWebsocket = function(){
-	var socketUrl = window.location.protocol.replace('http', 'ws') + '//' + window.location.host + '/ws';
-	this.ws = new WebSocket(socketUrl);
+	var url = window.location.protocol.replace('http', 'ws') + '//' + window.location.host + '/ws';
+	this.ws = new WebSocket(url);
 	this.ws.binaryType = 'arraybuffer';
 	this.has_error = false;
 	this.backoff = 100;
 	var self = this;
+	console.log("WS START",url);
 
 	this.ws.onclose = function(event){
+		console.log("WS CLOSE",event);
 		if (self.has_error) { return; }
-		self.announce("danger","Connection closed. Retrying soon.");
-		if(self.backoff < 30000) { self.backoff = self.backoff * 1.5; }
-		setTimeout(function(){
-			self.ws.readyState > 1 && self._setupWebsocket();
-		}, self.backoff);
+		self.announce("danger","Connection closed.<br />Reload this page to resume.");
 	};
 
 	this.ws.onerror = function (event) {
+		console.log("WS ERR",event);
 		self.announce("danger","Connection error. Reloading soon.");
 		if(self.backoff < 30000) { self.backoff = self.backoff * 1.5; }
 		self.has_error = true;
