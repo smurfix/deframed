@@ -204,27 +204,6 @@ DeFramed.prototype.req_getattr = function(m) {
 	return res;
 }
 
-DeFramed.prototype.m_auth_ok = function(m) {
-	this.announce("info",'Connected. Requesting data.');
-	this.send("start",null);
-};
-
-DeFramed.prototype.m_error = function(m) {
-	var d = $("<td/>")
-	d.addClass("danger");
-	if ("display" in m) {
-		d.text(m.display);
-	} else {
-		d.text("Error decoding: "+msg.data);
-	}
-};
-
-DeFramed.prototype.m_fail = function(m) {
-	this.announce("danger","Disconnected: "+m.message);
-	this.ws.close();
-};
-
-
 DeFramed.prototype._augmentInterface = function(){
 	var tags = document.getElementsByTagName('BUTTON');
 	for(var i = 0; i < tags.length; i++){
