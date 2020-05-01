@@ -273,6 +273,43 @@ DeFramed.prototype._elementActivated = function(action,ele){
 	this.send(action, this._getActionURL(ele));
 };
 
+DeFramed.prototype.msg_remi_update = function(m) {
+	var content = m[1];
+	var focusedElement=-1;
+	var caretStart=-1;
+	var caretEnd=-1;
+	if (document.activeElement) {
+		focusedElement = document.activeElement.id;
+		try {
+			caretStart = document.activeElement.selectionStart;
+			caretEnd = document.activeElement.selectionEnd;
+		} catch(e) {}
+	}
+	var elem = document.getElementById(m[0]);
+	try {
+		elem.insertAdjacentHTML('afterend',decodeURIComponent(m[1]));
+		elem.parentElement.removeChild(elem);
+	} catch(e) {
+		/*Microsoft EDGE doesn't support insertAdjacentHTML for SVGElement*/
+		var ns = document.createElementNS("http://www.w3.org/2000/svg",'tmp');
+		ns.innerHTML = decodeURIComponent(m[1]);
+		elem.parentElement.replaceChild(ns.firstChild, elem);
+	}
+
+	var elemToFocus = document.getElementById(focusedElement);
+	if (elemToFocus != null) {
+		elemToFocus.focus();
+		try {
+			elemToFocus = document.getElementById(focusedElement);
+			if(caretStart>-1 && caretEnd>-1) elemToFocus.setSelectionRange(caretStart, caretEnd);
+		} catch(e) {}
+	}
+}
+
+DeFramed.prototype.req_eval = function(m) {
+	return eval(m);
+}
+
 $(function() {
 	window.DF = new DeFramed();
 	$("#init_alert").remove();
