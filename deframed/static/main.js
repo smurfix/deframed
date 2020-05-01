@@ -200,12 +200,16 @@ DeFramed.prototype.msg_ping = function(m) {
 }
 
 DeFramed.prototype.msg_set = function(m) {
-	if (m.pre === true)
-		$("#"+m.id).prepend(m.content);
-	else if (m.pre === false)
-		$("#"+m.id).append(m.content);
+	var id = "#"+m[0]
+	var pre = m[2]
+	m = m[1]
+
+	if (pre === true)
+		$(id).prepend(m);
+	else if (pre === false)
+		$(id).append(m);
 	else
-		$("#"+m.id).html(m.content);
+		$(id).html(m);
 }
 
 

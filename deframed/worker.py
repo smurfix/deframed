@@ -418,7 +418,7 @@ class Worker:
             instead of (``None``) the existing content. The default is
             ``None``.
         """
-        await self.send("set", id=id, content=html, pre=prepend);
+        await self.send("set", [id, html, prepend]);
 
     async def send_busy(self, busy: bool):
         """
