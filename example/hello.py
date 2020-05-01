@@ -76,7 +76,7 @@ First, here's a simple form.
         await self.send_set("df_modal_title", "Random Title")
         await self.send_set("df_modal_body", "<p>Random content</p>")
         await self.send_set("df_modal_footer", '<button type="button" id="bt_m" class="btn btn-primary">Click Me</button>')
-        await self.send_modal_show()
+        await self.send_modal_show(keyboard=False)
         if ping:
             await self.ping("A2")
 

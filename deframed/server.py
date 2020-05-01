@@ -7,7 +7,9 @@ from hypercorn.config import Config as HyperConfig
 from hypercorn.trio import serve as hyper_serve
 from quart.logging import create_serving_logger
 from quart import jsonify, websocket, Response
+from quart.exceptions import NotFound
 from quart.static import send_from_directory
+from weakref import WeakValueDictionary
 import chevron
 
 from .util import attrdict, combine_dict
@@ -26,8 +28,10 @@ class App:
         cfg = combine_dict(cfg, CFG, cls=attrdict)
         self.cfg = cfg
         self.main = None # Nursery
-        self.clients = {}
+        self.clients = WeakValueDictionary()
         self.worker = worker
+        self.sub_worker = WeakValueDictionary()
+        self._sw_id = 0
         self.version = worker.version or deframed.__version__
         self.debug=debug or cfg.debug
 
@@ -36,7 +40,7 @@ class App:
                 static_folder=None,template_folder=None,root_path="/nonexistent",
                 )
 
-        @self.app.route("/<path:p>", methods=['GET'])
+        #@self.app.route("/<path:p>", methods=['GET'])
         @self.app.route("/", defaults={"p":None}, methods=['GET'])
         async def index(p):
             # "path" is unused, the app will get it via Javascript
@@ -54,15 +58,36 @@ class App:
 
         @self.app.websocket('/ws')
         async def ws():
+            """Main websocket"""
             w = self.worker(self)
             await w.run(websocket._get_current_object())
 
+        @self.app.route("/sub/<int:sid>", methods=['GET'])
+        async def index_sub(sid):
+            """SubWorker main page"""
+            w = self.sub_worker[sid]
+            return await w.index()
+
+        @self.app.websocket('/ws/<int:sid>')
+        async def ws_sub(sid):
+            """SubWorker websocket"""
+            try:
+                w = self.sub_worker[sid]
+            except KeyError:
+                raise NotFound
+
+            else:
+                await w.run(websocket._get_current_object())
 
         static = os.path.join(os.path.dirname(deframed.__file__), cfg.data.static)
         @self.app.route("/static/<path:filename>", methods=['GET'])
         async def send_static(filename):
             print("GET",filename)
             return await send_from_directory(static, filename)
+
+    def route(self,*a,**k):
+        return self.app.route(*a,**k)
+
 
     async def run (self) -> None:
         """
@@ -89,4 +114,17 @@ class App:
             self.main = n
             await hyper_serve(self.app, config)
 
+    def attach_sub(self, subworker):
+        """
+        Attach a sub-worker, typically displayed in an iframe.
+        
+        There is no "detach", as the worker is weakly referenced.
+
+        There is no "get", as the ID only shows up in the path.
+        """
+        self._sw_id += 1
+        sw_id = self._sw_id
+
+        self.sub_worker[sw_id] = subworker
+        return sw_id
 

@@ -15,6 +15,11 @@ processing = ContextVar("processing", default=None)
 import logging
 logger = logging.getLogger(__name__)
 
+async def _spawn(task, *args, task_status=trio.TASK_STATUS_IGNORED):
+    with trio.CancelScope() as sc:
+        task_status.started(sc)
+        await task(*args)
+
 
 class UnknownActionError(RuntimeError):
     """
@@ -48,8 +53,6 @@ class Talker:
 
     def __init__(self, websocket):
         self.ws = websocket
-        self.n = 1
-        self.req = {}
 
         global _talk_id
         self._id = _talk_id
@@ -115,28 +118,13 @@ class Talker:
             await self.w.wait()
         while True:
             data = await self.ws.receive()
-            data = unpack(data)
+            try:
+                data = unpack(data)
+            except TypeError:
+                logger.error("IN X %r",data)
+                raise
             logger.debug("IN %r",data)
-            action,data = data
-            if action == "reply":
-                self._reply(*data)
-                continue
-
-            try:
-                res = getattr(self.w, 'msg_'+action)
-            except AttributeError:
-                res = partial(self.w.any_msg,action)
-            tk = processing.set((action,data))
-            try:
-                await res(data)
-            finally:
-                processing.reset(tk)
-
-    async def _reply(self, n, data):
-        if isinstance(data,Mapping) and '_error' in data:
-            data = ClientError(**data)
-        evt,self.req[n] = self.req[n],data
-        evt.set()
+            await self.w.data_in(data)
 
     async def ws_out(self, *, task_status=trio.TASK_STATUS_IGNORED):
         """
@@ -156,53 +144,23 @@ class Talker:
         data = pack(data)
         await self.ws.send(data)
 
-    async def send(self, action,data):
+    async def send(self, data:Any):
         """
         Send a message to the client.
         """
-        if action == "req":
-            raise RuntimeError("Use '.request' for that!")
-        await self._send_q.send((action,data))
-
-    async def request(self, action,data):
-        """
-        Send a request to the client, await+return the reply
-        """
-        if processing.get():
-            raise RuntimeError("You cannot call this from within the receiver",processing.get())
-
-        self.n += 1
-        n = self.n
-        self.req[n] = evt = trio.Event()
-        try:
-            await self.send_q.put(("ask",[action,n,data]))
-            await evt.wait()
-        except BaseException:
-            self.req.pop(n)
-            raise
-        else:
-            res = self.req.pop(n)
-            if isinstance(res,Exception):
-                raise res
-            return res
+        await self._send_q.send(data)
 
 
-class Worker:
+class BaseWorker:
     """
     This is the base class for a client session. It might be interrupted
     (page reload, network glitch, or whatever).
 
-    The worker's read loop calls ``.msg_{action}`` methods with the
-    incoming message. Code in those methods must not call ``.request``
-    because that would cause a deadlock. (Don't worry, DeFramed catches
-    those.) Start a separate task with ``.spawn`` if you need to do this.
+    The talker's read loop calls :meth:`data_in` with the incoming message.
     """
     _talk = None
     _scope = None
     _nursery = None
-    _persistent_nursery = None
-    _kill_exc = None
-    _kill_flag = None
 
     title = "You forgot to set a title"
     fatal_msg = "The server had a fatal error.<br />It was logged and will be fixed soon."
@@ -222,7 +180,7 @@ class Worker:
         """
         pass
 
-    async def attach(self, talker):
+    def attach(self, talker):
         """
         Use this socket to talk. Called by the app.
 
@@ -233,6 +191,43 @@ class Worker:
         self._talk = talker
         talker.attach(self)
 
+    async def _monitor(self, *, task_status=trio.TASK_STATUS_IGNORED):
+        """
+        Background monitor. Don't override externally.
+        """
+        task_status.started()
+        pass
+
+    async def run(self, websocket):
+        """
+        Main entry point. Takes a websocket, sets up everything, then calls
+        ".talk".
+
+        You don't want to override this. Your main code should be in
+        `talk`, your setup code (called by the server) in `init`.
+        """
+        t = Talker(websocket)
+
+        try:
+            async with trio.open_nursery() as n:
+                self._nursery = n
+                await n.start(self._monitor)
+                await n.start(t.run)
+                self.attach(t)
+                with trio.CancelScope() as sc:
+                    self._scope = sc
+                    try:
+                        await self.talk()
+                    finally:
+                        self._scope = None
+        except Exception:
+            await t.died(self.fatal_msg)
+            raise
+        # not on BaseException, as in that case we close the connection and
+        # expect the client to try reconnecting
+        else:
+            await t.died(self.fatal_msg)
+
 
     async def talk(self):
         """
@@ -242,15 +237,99 @@ class Worker:
         """
         pass
 
-    def cancel(self, persistent=False):
-        if persistent and self._persistent_nursery is not None:
-            self._persistent_nursery.cancel_scope.cancel()
+    def cancel(self):
         if self._scope is not None:
             self._scope.cancel()
 
         if self._scope is None:
             return
         self._scope.cancel()
+
+    async def spawn(self, task, *args):
+        """
+        Start a new task. Returns a cancel scope which you can use to stop
+        the task.
+
+        By default, errors get logged but don't propagate. Set ``log_exc=False``
+        if you don't want that. Or set "log_exc" to the exception, or list of
+        exceptions, you want to have logged.
+        """
+        return await self._nursery.start(_spawn,task,*args)
+
+    async def maybe_disconnect(self, talker):
+        """internal method, called by the Talker"""
+        if self._talk is talker:
+            logger.debug("DISCONNECT")
+            await self.disconnect()
+
+    async def disconnect(self):
+        """
+        The client websocket disconnected. This method might not be called
+        when a client reattaches.
+        """
+        self.cancel()
+
+    async def send(self, data:Any):
+        """
+        Send a message to the client.
+        """
+        await self._talk.send(data)
+
+    async def data_in(self, data):
+        """
+        Process incoming data
+        """
+        pass
+
+
+class Worker(BaseWorker):
+    """
+    This is the main class for a client session.
+
+    The talker's read loop calls ``.msg_{action}`` methods with the
+    incoming message. Code in those methods must not call ``.request``
+    because that would cause a deadlock. (Don't worry, DeFramed catches
+    those.) Start a separate task with ``.spawn`` if you need to do this.
+    """
+    _persistent_nursery = None
+    _kill_exc = None
+    _kill_flag = None
+
+    def __init__(self,*a,**k):
+        super().__init__(*a,**k)
+        self.n = 1
+        self.req = {}
+
+    async def data_in(self, data):
+        """
+        Process incoming data. Must be structured [type,data].
+
+        Replies are special:["reply",[assoc_nr,data]].
+        """
+        action,data = data
+        if action == "reply":
+            self._reply(*data)
+            return
+        try:
+            res = getattr(self, 'msg_'+action)
+        except AttributeError:
+            res = partial(self.any_msg,action)
+        tk = processing.set((action,data))
+        try:
+            await res(data)
+        finally:
+            processing.reset(tk)
+
+    async def _reply(self, n, data):
+        if isinstance(data,Mapping) and '_error' in data:
+            data = ClientError(**data)
+        evt,self.req[n] = self.req[n],data
+        evt.set()
+
+    def cancel(self, persistent=False):
+        if persistent and self._persistent_nursery is not None:
+            self._persistent_nursery.cancel_scope.cancel()
+        super().cancel()
 
     async def spawn(self, task, *args, persistent=True):
         """
@@ -270,23 +349,9 @@ class Worker:
                 await task(*args)
 
         if persistent:
-            await self._run(_spawn,task,*args)
+            return await self._run(_spawn,task,*args)
         else:
-            await self._nursery.start(_spawn,task,*args)
-
-
-    async def maybe_disconnect(self, talker):
-        """internal method, called by the Talker"""
-        if self._talk is talker:
-            logger.debug("DISCONNECT")
-            await self.disconnect()
-
-    async def disconnect(self):
-        """
-        The client websocket disconnected. This method might not be called
-        when a client reattaches.
-        """
-        self.cancel()
+            return await self._nursery.start(_spawn,task,*args)
 
     async def getattr(self, **a: Dict[str,List[str]]) -> Dict[str,Optional[List[str]]]:
         """
@@ -517,13 +582,43 @@ class Worker:
 
         You should probably call one of the specific ``send_*` methods instead.
         """
+        if action == "req":
+            raise RuntimeError("Use '.request' for that!")
         if kw:
             if data:
-                kw.update(data)
+                data.update(kw)
             else:
                 data = kw
 
-        await self._talk.send(action,data)
+        await super().send([action,data])
+
+    async def request(self, action:str, data:Any=None, **kw):
+        """
+        Send a request to the client, await+return the reply
+        """
+        if processing.get():
+            raise RuntimeError("You cannot call this from within the receiver",processing.get())
+
+        self.n += 1
+        n = self.n
+        self._req[n] = evt = trio.Event()
+
+        if kw:
+            if data:
+                data.update(kw)
+            else:
+                data = kw
+        try:
+            await self.send("ask",[action,n,data])
+            await evt.wait()
+        except BaseException:
+            self._req.pop(n)
+            raise
+        else:
+            res = self._req.pop(n)
+            if isinstance(res,Exception):
+                raise res
+            return res
 
     async def request(self, action:str, data:Any):
         """
@@ -536,37 +631,7 @@ class Worker:
         """
         return await self._talk.request(action,data)
 
-    async def run(self, websocket):
-        """
-        Main entry point. Takes a websocket, sets up everything, then calls
-        ".talk".
-
-        You don't want to override this. Your main code should be in
-        `talk`, your setup code (called by the server) in `init`.
-        """
-        t = Talker(websocket)
-
-        try:
-            async with trio.open_nursery() as n:
-                self._nursery = n
-                await n.start(self._kill_wait)
-                await n.start(t.run)
-                await self.attach(t)
-                with trio.CancelScope() as sc:
-                    self._scope = sc
-                    try:
-                        await self.talk()
-                    finally:
-                        self._scope = None
-        except Exception:
-            await t.died(self.fatal_msg)
-            raise
-        # not on BaseException, as in that case we close the connection and
-        # expect the client to try reconnecting
-        else:
-            await t.died(self.fatal_msg)
-
-    async def _kill_wait(self, *, task_status=trio.TASK_STATUS_IGNORED):
+    async def _monitor(self, *, task_status=trio.TASK_STATUS_IGNORED):
         self._kill_wait = trio.Event()
         task_status.started()
         await self._kill_wait.wait()
@@ -581,11 +646,11 @@ class Worker:
 
         Exceptions are propagated back to the worker.
         """
-        async def _work(proc, args, task_status=trio.TASK_STATUS_IGNORED):
+        async def _work(proc, *args, task_status=trio.TASK_STATUS_IGNORED):
             try:
                 async with trio.open_nursery() as n:
                     self._persistent_nursery = n
-                    res = await n.start(_work, proc, args)
+                    res = await n.start(proc, *args)
                     task_status.started(res)
             except Exception as exc:
                 self._kill_exc = exc
@@ -646,4 +711,19 @@ class Worker:
             self.cancel(True)
             return True
 
+
+class SubWorker(BaseWorker):
+    """
+    This is a worker that attaches to another via an iframe.
+    """
+    def __init__(self, worker):
+        self.master = worker
+        super().__init__(worker._app)
+        self.sub_id = self._app.attach_sub(self)
+
+    async def index(self):
+        """
+        Render the main page
+        """
+        raise RuntimeError("You need to override sending the main page")
 
