@@ -11,6 +11,7 @@ var DeFramed = function(){
 	this.version = null;
 	this.backoff = 100;
 	this.debug = sessionStorage.getItem('debug');
+	this.reconnect_timer = null;
 
 	this._setupListeners();
 	this._setupWebsocket();
@@ -26,7 +27,11 @@ DeFramed.prototype._setupListeners = function(){
 		self._augmentInterface();
 	});
 	window.onbeforeunload = function(){
-		self.ws && self.ws.close();
+		if (self.ws) {
+			// prevent reconnect attempts and any strange popups
+			self.has_error = true;
+			self.ws.close();
+		}
 	};
 };
 
@@ -62,6 +67,14 @@ DeFramed.prototype.announce = function(typ,txt,timeout,id){
 	}
 };
 
+DeFramed.prototype.reconnect = function(){
+	if (this.reconnect_timer) {
+		clearTimeout(this.reconnect_timer);
+		this.reconnect_timer = null;
+	}
+	this._setupWebsocket();
+};
+
 DeFramed.prototype._setupWebsocket = function(){
 	var url = window.location.protocol.replace('http', 'ws') + '//' + window.location.host + '/ws';
 	this.ws = new WebSocket(url);
@@ -78,12 +91,10 @@ DeFramed.prototype._setupWebsocket = function(){
 
 	this.ws.onerror = function (event) {
 		if (self.debug) console.log("WS ERR",event);
-		self.announce("danger","Connection error. Reloading soon.");
+		self.announce("danger","Connection error. Reconnecting soon.");
 		if(self.backoff < 30000) { self.backoff = self.backoff * 1.5; }
 		self.has_error = true;
-		setTimeout(function(){
-			self.ws.readyState > 1 && self._setupWebsocket();
-		}, self.backoff);
+		self.reconnect_timer = setTimeout(self._setupWebsocket, self.backoff);
 	};
 
 	this.ws.onmessage = function(event){
@@ -118,7 +129,10 @@ DeFramed.prototype.send = function(action,data) {
 	if(action == "reply") {
 		if (this.debug) console.log("You can't reply here",data);
 	} else {
-		this.ws.send(msgpack.encode([action,data]));
+		data = msgpack.encode([action,data]);
+		if (this.ws) {
+			this.ws.send(data);
+		}
 	}
 };
 
@@ -155,7 +169,7 @@ DeFramed.prototype.msg_info = function(m) {
 
 DeFramed.prototype.msg_fatal = function(m) {
 	this.has_error = true;
-	this.announce("danger",`${m}<br /><a class=\"btn btn-outline-danger btn-sm\" href=\"#\" onclick=\"DF._setupWebsocket()\">Click here</a> to reconnect.`);
+	this.announce("danger",`${m}<br /><a class=\"btn btn-outline-danger btn-sm\" href=\"#\" onclick=\"DF.reconnect()\">Click here</a> to reconnect.`);
 	this.msg_busy(m.busy);
 }
 
