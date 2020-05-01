@@ -11,6 +11,12 @@ var DeFramed = function(){
 	this.version = null;
 	this.backoff = 100;
 	this.debug = sessionStorage.getItem('debug');
+	this.send_pending = [];
+	this.send_timeout = 3000;
+	this.send_timer = null;
+	this.recv_pending = 0;
+	this.recv_timeout = 500;
+	this.recv_timer = null;
 	this.reconnect_timer = null;
 
 	this._setupListeners();
@@ -85,12 +91,20 @@ DeFramed.prototype._setupWebsocket = function(){
 
 	this.ws.onclose = function(event){
 		if (self.debug) console.log("WS CLOSE",event);
+		if (self.send_timer) {
+			clearTimeout(self.send_timer);
+			self.send_timer = null;
+		}
 		if (self.has_error) { return; }
 		self.announce("danger","Connection closed.<br /><a class=\"btn btn-outline-danger btn-sm\" href=\"#\" onclick=\"DF._setupWebsocket()\">Click here</a> to reconnect.");
 	};
 
 	this.ws.onerror = function (event) {
 		if (self.debug) console.log("WS ERR",event);
+		if (self.send_timer) {
+			clearTimeout(self.send_timer);
+			self.send_timer = null;
+		}
 		self.announce("danger","Connection error. Reconnecting soon.");
 		if(self.backoff < 30000) { self.backoff = self.backoff * 1.5; }
 		self.has_error = true;
@@ -102,6 +116,11 @@ DeFramed.prototype._setupWebsocket = function(){
 		var action = m[0];
 		m = m[1];
 		if (self.debug) console.log("IN",action,m);
+		if (action != "ack") {
+			self.recv_pending = self.recv_pending + 1;
+			if (!self.recv_timer)
+				self.recv_timer = setTimeout(self.handle_recv_timeout, self.recv_timeout);
+		}
 		var p = self["msg_"+action];
 		if (p === undefined) {
 			self.announce("warning",`Unknown message type '${action}'`);
@@ -124,16 +143,51 @@ DeFramed.prototype._setupWebsocket = function(){
 	};
 };
 
+DeFramed.prototype.handle_recv_timeout = function() {
+	this.recv_timer = null;
+	if (!this.ws)
+		return;
+	var data = msgpack.encode(["ack",this.recv_pending]);
+	this.ws.send(data);
+	if (this.debug) console.log("ACK_R",this.recv_pending);
+	this.recv_pending = 0;
+};
+
+DeFramed.prototype.handle_send_timeout = function() {
+	this.send_timer = null;
+	this.has_error = true;
+	this.ws.close();
+
+	this.announce("danger","Socket timeout. Reconnecting soon.");
+	this.reconnect_timer = setTimeout(self._setupWebsocket(), self.backoff);
+};
+
 DeFramed.prototype.send = function(action,data) {
 	if (this.debug) console.log("OUT",action,data);
 	if(action == "reply") {
 		if (this.debug) console.log("You can't reply here",data);
 	} else {
 		data = msgpack.encode([action,data]);
+		this.send_pending.push(data);
 		if (this.ws) {
 			this.ws.send(data);
+			if (!this.send_timer)
+				this.send_timer = setTimeout(this.handle_send_timeout, this.send_timeout);
 		}
 	}
+};
+
+DeFramed.prototype.msg_ack = function(data) {
+	this.send_pending.splice(ack);
+	if(this.send_timer)
+		clearTimeout(this.send_timer);
+	else
+		console.log("??? msg_ack: send_timer halted")
+
+	if (this.send_pending.length)
+		this.send_timer = setTimeout(this.handle_send_timeout, this.send_timeout);
+	else
+		this.send_timer = null;
 };
 
 DeFramed.prototype.msg_req = function(data) {
