@@ -20,12 +20,16 @@ class Work(Worker):
     # version="1.2.3" -- uses DeFramed's version if not set
 
     async def show_main(self, token):
+        if token != "A2":
+            await self.send_modal_hide()
         if token is None or token == "A0":
             await self.send_debug(True)
             await self.put_form(ping=False)
         elif token == "A1":
             await self.put_button(ping=False)
         elif token == "A2":
+            await self.put_modal(ping=False)
+        elif token == "A3":
             await self.put_done(ping=False)
         else:
             await self.send_alert("warning", "The token was "+repr(token), id="bad_token", timeout=10)
@@ -67,19 +71,32 @@ First, here's a simple form.
         await self.send_set("df_main", "<p>Success. Next, here's a button. <button id=\"butt1\" class=\"btn btn-dark\">Do it!</button></p>")
         await self.ping("A1")
 
+    async def put_modal(self,ping=True):
+        await self.send_set("df_main", "<p>We're showing a modal so you don't see this.</p>")
+        await self.send_set("df_modal_title", "Random Title")
+        await self.send_set("df_modal_body", "<p>Random content</p>")
+        await self.send_set("df_modal_footer", '<button type="button" id="bt_m" class="btn btn-primary">Click Me</button>')
+        await self.send_modal_show()
+        if ping:
+            await self.ping("A2")
+
     async def put_done(self,ping=True):
         await self.send_set("df_main", "<p>Aww … you pressed the button!</p>")
         if ping:
-            await self.ping("A2")
+            await self.ping("A3")
 
 
     async def form_form1(self, **kw):
         logger.debug("GOT %r",kw)
         await self.put_button()
 
+    async def button_bt_m(self, **kw):
+        await self.send_modal_hide()
+        await self.put_done()
+
     async def button_butt1(self, **kw):
         logger.debug("GOT %r",kw)
-        await self.put_done()
+        await self.put_modal()
 
 
 

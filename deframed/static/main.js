@@ -179,6 +179,14 @@ DeFramed.prototype.msg_busy = function(m) {
 	else { $("#df_spinner").hide(); }
 }
 
+DeFramed.prototype.msg_modal = function(m) {
+	var id = "#"+m[0];
+	m = m[1];
+	if(m === false) { $(id).modal('hide'); }
+	else if(m === true) { $(id).modal('show'); }
+	else { $(id).modal(m); }
+}
+
 DeFramed.prototype.msg_debug = function(m) {
 	if(m === true) this.debug=true;
 	else if(m === false) this.debug=false;

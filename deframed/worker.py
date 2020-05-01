@@ -398,6 +398,29 @@ class Worker:
         """
         await self.send("info", level=level, text=text, **kw)
 
+    async def send_modal_show(self, id: str = "df_modal", **opts):
+        """
+        Show a modal window.
+
+        If the ID is not given, use the built-in ``df_modal``.
+
+        Any further parameters are as described in
+        https://getbootstrap.com/docs/4.4/components/modal/.
+        """
+        if not opts:
+            opts = True
+
+        await self.send("modal",[id,opts])
+
+    async def send_modal_hide(self, id: str = "df_modal"):
+        """
+        Hide a modal window.
+
+        If the ID is not given, use the built-in ``df_modal``.
+        """
+        await self.send("modal",[id,False])
+
+
     async def send_set(self, id: str, html: str, prepend: Optional[bool]=None):
         """
         Set or extend an element's innerHTML content.
