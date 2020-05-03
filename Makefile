@@ -2,7 +2,7 @@
 
 .PHONY: doc test update all tag pypi upload
 
-all: \
+all: dirs\
 	deframed/static/ext/msgpack.min.js  \
 	deframed/static/ext/mustache.min.js \
 	deframed/static/ext/jquery.min.js   \
@@ -10,6 +10,9 @@ all: \
 	deframed/static/ext/bootstrap.min.js   \
 	deframed/static/ext/bootstrap.min.css
 
+dirs: deframed/static/ext
+deframed/static/ext:
+	mkdir $@
 deframed/static/ext/msgpack.min.js:
 	wget -O $@ "https://github.com/ygoe/msgpack.js/raw/master/msgpack.min.js"
 
