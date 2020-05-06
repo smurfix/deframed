@@ -158,8 +158,8 @@ DeFramed.prototype.send = function(action,data) {
 };
 
 DeFramed.prototype.msg_req = function(data) {
-	action=data[0];
-	n=data[1];
+	var action=data[0];
+	var n=data[1];
 	data=data[2];
 	try {
 		data=this["req_"+action](data);
