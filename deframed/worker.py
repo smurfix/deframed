@@ -299,8 +299,8 @@ class Worker(BaseWorker):
 
     def __init__(self,*a,**k):
         super().__init__(*a,**k)
-        self.n = 1
-        self.req = {}
+        self._n = 1
+        self._req = {}
 
     async def data_in(self, data):
         """
@@ -325,7 +325,7 @@ class Worker(BaseWorker):
     async def _reply(self, n, data):
         if isinstance(data,Mapping) and '_error' in data:
             data = ClientError(**data)
-        evt,self.req[n] = self.req[n],data
+        evt,self._req[n] = self._req[n],data
         evt.set()
 
     def cancel(self, persistent=False):
@@ -601,8 +601,8 @@ class Worker(BaseWorker):
         if processing.get():
             raise RuntimeError("You cannot call this from within the receiver",processing.get())
 
-        self.n += 1
-        n = self.n
+        self._n += 1
+        n = self._n
         self._req[n] = evt = trio.Event()
 
         if kw:
@@ -611,7 +611,7 @@ class Worker(BaseWorker):
             else:
                 data = kw
         try:
-            await self.send("ask",[action,n,data])
+            await super().send(["req",[action,n,data]])
             await evt.wait()
         except BaseException:
             self._req.pop(n)
@@ -621,17 +621,6 @@ class Worker(BaseWorker):
             if isinstance(res,Exception):
                 raise res
             return res
-
-    async def request(self, action:str, data:Any):
-        """
-        Send a request to the client.
-
-        Returns the reply, or raises an error.
-
-        This method is used by `getattr` and `exists`, among others. You
-        probably should use one of these instead of calling this directly.
-        """
-        return await self._talk.request(action,data)
 
     async def _monitor(self, *, task_status=trio.TASK_STATUS_IGNORED):
         self._kill_wait = trio.Event()
