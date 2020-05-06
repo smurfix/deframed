@@ -23,9 +23,30 @@ DeFramed.prototype._setupListeners = function(){
 	document.addEventListener('DOMContentLoaded', function() {
 		self._augmentInterface();
 	});
-	document.addEventListener('DOMSubtreeModified', function() {
-		self._augmentInterface();
-	});
+	if(window.MutationObserver) {
+		// Select the node that will be observed for mutations
+		const targetNode = document.getElementById('some-id');
+
+		// Options for the observer (which mutations to observe)
+		const config = { attributes: true, childList: true, subtree: true };
+
+		// Callback function to execute when mutations are observed
+		const callback = function(mutationsList, observer) {
+			// Use traditional 'for loops' for IE 11
+			// for(let mutation of mutationsList) { do_something; }
+			self._augmentInterface();
+		};
+
+		// Create an observer instance linked to the callback function
+		const observer = new MutationObserver(callback);
+
+		// Start observing the target node for configured mutations
+		observer.observe(document, config);
+	} else {
+		document.addEventListener('DOMSubtreeModified', function() {
+			self._augmentInterface();
+		});
+	}
 	window.onbeforeunload = function(){
 		if (self.ws) {
 			// prevent reconnect attempts and any strange popups
