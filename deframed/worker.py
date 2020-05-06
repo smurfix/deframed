@@ -5,6 +5,7 @@ communication with the client.
 
 from uuid import uuid1,UUID
 import trio
+from collections.abc import Mapping
 from typing import Optional,Dict,List,Union,Any
 from .codec import pack, unpack
 from functools import partial
