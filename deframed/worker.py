@@ -310,7 +310,7 @@ class Worker(BaseWorker):
         """
         action,data = data
         if action == "reply":
-            self._reply(*data)
+            await self._reply(*data)
             return
         try:
             res = getattr(self, 'msg_'+action)
