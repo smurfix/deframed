@@ -345,17 +345,12 @@ class Worker(BaseWorker):
         if you don't want that. Or set "log_exc" to the exception, or list of
         exceptions, you want to have logged.
         """
-        async def _spawn(task, *args, task_status=trio.TASK_STATUS_IGNORED):
-            with trio.CancelScope() as sc:
-                task_status.started(sc)
-                await task(*args)
-
         if persistent:
             return await self._run(_spawn,task,*args)
         else:
             return await self._nursery.start(_spawn,task,*args)
 
-    async def getattr(self, **a: Dict[str,List[str]]) -> Dict[str,Optional[List[str]]]:
+    async def get_attr(self, **a: Dict[str,List[str]]) -> Dict[str,Optional[List[str]]]:
         """
         Returns a list of attributes for some element.
         The element is identified by its ID.
@@ -368,9 +363,15 @@ class Worker(BaseWorker):
         """
         Check whether the DOM element with this ID exists.
         """
-        return (await self.getattr({id:{}}))[id] is not None
+        return (await self.get_attr({id:{}}))[id] is not None
 
-    async def msg_first(self, data) -> bool:
+    async def elem_info(self, id) -> dict:
+        """
+        Return information about this element (size, position)
+        """
+        return await self.request("elem_info", id)
+
+    async def msg_setup(self, data) -> bool:
         """
         Called when the client is connected and says Hello.
 
@@ -384,7 +385,7 @@ class Worker(BaseWorker):
             await self.send('reload',True)
             return True
 
-        await self.send_first();
+        await self._setup();
 
         uuid = data.get('uuid')
         if uuid is None or not self.set_uuid(uuid):
@@ -435,16 +436,16 @@ class Worker(BaseWorker):
         """
         raise UnknownActionError(name, data)
 
-    async def send_first(self):
+    async def _setup(self):
         """
         Send initial data to the client.
 
-        Called by `msg_first`.
+        Called by `msg_setup`.
         You probably should not override this.
         """
-        await self.send("first", version=self._app.version, uuid=str(self.uuid))
+        await self.send("setup", version=self._app.version, uuid=str(self.uuid))
 
-    async def send_alert(self, level, text, **kw):
+    async def alert(self, level, text, **kw):
         """
         Send a pop-up message to the client.
 
@@ -465,7 +466,7 @@ class Worker(BaseWorker):
         """
         await self.send("info", level=level, text=text, **kw)
 
-    async def send_modal_show(self, id: str = "df_modal", **opts):
+    async def modal_show(self, id: str = "df_modal", **opts):
         """
         Show a modal window.
 
@@ -479,7 +480,7 @@ class Worker(BaseWorker):
 
         await self.send("modal",[id,opts])
 
-    async def send_modal_hide(self, id: str = "df_modal"):
+    async def modal_hide(self, id: str = "df_modal"):
         """
         Hide a modal window.
 
@@ -488,7 +489,7 @@ class Worker(BaseWorker):
         await self.send("modal",[id,False])
 
 
-    async def send_set(self, id: str, html: str, prepend: Optional[bool]=None):
+    async def set_content(self, id: str, html: str, prepend: Optional[bool]=None):
         """
         Set or extend an element's innerHTML content.
 
@@ -510,7 +511,62 @@ class Worker(BaseWorker):
         """
         await self.send("set", [id, html, prepend]);
 
-    async def send_busy(self, busy: bool):
+    async def set_element(self, id: str, html: str):
+        """
+        Replace an element.
+
+        Args:
+          id:
+            the old element's ID.
+          html:
+            the element's replacement.
+        """
+        await self.send("elem", [id, html]);
+
+    async def load_style(self, id, url):
+        """
+        Load a stylesheet.
+
+        The ID is used for disambiguation.
+        """
+        await self.send("load_style", [id, url])
+
+    async def set_attr(self, id: str, **attrs):
+        """
+        Set or extend an element's attribute(s).
+        Args:
+          id:
+            the modified HTML element's ID.
+          attr=value:
+            the element's changed attributes.
+        """
+        await self.send("set_attr", [id, attrs]);
+
+    async def add_class(self, id: str, *cls):
+        """
+        Add the given classes to an element.
+
+        Args:
+          id:
+            the modified HTML element's ID.
+          cls:
+            the class to add.
+        """
+        await self.send("add_class", [id, cls]);
+
+    async def remove_class(self, id: str, *cls):
+        """
+        Remove the given classes from an element.
+
+        Args:
+          id:
+            the modified HTML element's ID.
+          cls:
+            the class(es) to remove.
+        """
+        await self.send("remove_class", [id, cls]);
+
+    async def busy(self, busy: bool):
         """
         Show/hide the client's spinner.
 
@@ -520,7 +576,7 @@ class Worker(BaseWorker):
         """
         await self.send("busy", busy)
 
-    async def send_debug(self, val: Union[bool,str]):
+    async def debug(self, val: Union[bool,str]):
         """
         Set/clear the client's debug flag, or log a message on its console.
 
@@ -563,6 +619,14 @@ class Worker(BaseWorker):
         Args:
           data:
             the token value you sent with :meth:`send_ping`.
+        """
+        pass
+
+    async def msg_size(self, evt):
+        """
+        The main window's size.
+
+        This is informational.
         """
         pass
 

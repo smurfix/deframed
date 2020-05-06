@@ -21,9 +21,9 @@ class Work(Worker):
 
     async def show_main(self, token):
         if token != "A2":
-            await self.send_modal_hide()
+            await self.modal_hide()
         if token is None or token == "A0":
-            await self.send_debug(True)
+            await self.debug(True)
             await self.put_form(ping=False)
         elif token == "A1":
             await self.put_button(ping=False)
@@ -32,15 +32,15 @@ class Work(Worker):
         elif token == "A3":
             await self.put_done(ping=False)
         else:
-            await self.send_alert("warning", "The token was "+repr(token), id="bad_token", timeout=10)
+            await self.alert("warning", "The token was "+repr(token), id="bad_token", timeout=10)
             await self.put_form()
-        await self.send_alert("info", None)
-        await self.send_busy(False)
+        await self.alert("info", None)
+        await self.busy(False)
 
     async def put_form(self, ping=True):
-        await self.send_set("df_footer_left", "'Hello' demo example")
-        await self.send_set("df_footer_right", "via DeFramed, the non-framework")
-        await self.send_set("df_main", """
+        await self.set_content("df_footer_left", "'Hello' demo example")
+        await self.set_content("df_footer_right", "via DeFramed, the non-framework")
+        await self.set_content("df_main", """
 <p>
 This is a toy test program which shows how to talk to your browser.
 </p>
@@ -61,27 +61,27 @@ First, here's a simple form.
         f=TestForm()
         f.id="plugh"
         fw=TableWidget()
-        await self.send_set("plugh", fw(f))
+        await self.set_content("plugh", fw(f))
 
-        await self.send_alert("info","Ready!", busy=False, timeout=2)
+        await self.alert("info","Ready!", busy=False, timeout=2)
         if ping:
             await self.ping("A0")
 
     async def put_button(self,ping=True):
-        await self.send_set("df_main", "<p>Success. Next, here's a button. <button id=\"butt1\" class=\"btn btn-dark\">Do it!</button></p>")
+        await self.set_content("df_main", "<p>Success. Next, here's a button. <button id=\"butt1\" class=\"btn btn-dark\">Do it!</button></p>")
         await self.ping("A1")
 
     async def put_modal(self,ping=True):
-        await self.send_set("df_main", "<p>We're showing a modal so you don't see this.</p>")
-        await self.send_set("df_modal_title", "Random Title")
-        await self.send_set("df_modal_body", "<p>Random content</p>")
-        await self.send_set("df_modal_footer", '<button type="button" id="bt_m" class="btn btn-primary">Click Me</button>')
-        await self.send_modal_show(keyboard=False)
+        await self.set_content("df_main", "<p>We're showing a modal so you don't see this.</p>")
+        await self.set_content("df_modal_title", "Random Title")
+        await self.set_content("df_modal_body", "<p>Random content</p>")
+        await self.set_content("df_modal_footer", '<button type="button" id="bt_m" class="btn btn-primary">Click Me</button>')
+        await self.modal_show(keyboard=False)
         if ping:
             await self.ping("A2")
 
     async def put_done(self,ping=True):
-        await self.send_set("df_main", "<p>Aww … you pressed the button!</p>")
+        await self.set_content("df_main", "<p>Aww … you pressed the button!</p>")
         if ping:
             await self.ping("A3")
 
@@ -91,7 +91,7 @@ First, here's a simple form.
         await self.put_button()
 
     async def button_bt_m(self, **kw):
-        await self.send_modal_hide()
+        await self.modal_hide()
         await self.put_done()
 
     async def button_butt1(self, **kw):

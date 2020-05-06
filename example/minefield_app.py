@@ -18,7 +18,7 @@ import random
 
 from quart.static import send_from_directory
 import deframed.remi.gui as gui
-from deframed.remi import Remi
+from deframed.remi import RemiWorker
 from deframed import App,Worker
 from deframed.default import CFG
 
@@ -94,7 +94,7 @@ class Cell(gui.TableItem):
         self.nearest_mine += 1
 
 
-class MyApp(Remi,Worker):
+class Minefield(RemiWorker):
     title = "Minefield"
 
     _timer = None
@@ -276,9 +276,12 @@ class MyApp(Remi,Worker):
                 self.mine_matrix[y][x].onclick.do(self.mine_matrix[y][x].check_mine)
             self.mine_table.append(row)
 
+class MyApp(Worker):
     # DeFramed stuff
     async def show_main(self, token):
-        await self.show_gui(self.main(), width=800,height=500, name="Minefield")
+        self.w = Minefield(self)
+        await self.w.show(width=800,height=500, name=self.w.title)
+        await self.busy(False)
 
 
 async def main():

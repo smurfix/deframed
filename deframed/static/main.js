@@ -12,9 +12,34 @@ var DeFramed = function(){
 	this.backoff = 100;
 	this.debug = sessionStorage.getItem('debug');
 	this.reconnect_timer = null;
-
 	this._setupListeners();
-	this._setupWebsocket();
+
+	this.iframes = {};
+
+	if (window.DF_parent_uuid) {
+		this.parent = window.parent;
+		window.addEventListener("message", this.receiveMessage, false);
+	} else {
+		this.parent = null;
+		this._setupWebsocket();
+	}
+}
+
+DeFramed.prototype.receiveMessage = function(event) {
+	var m = event.data;
+	if (m.dest == DF_uuid) { // from child
+		var id = m.uuid;
+		delete m.uuid;
+		delete m.dest;
+		this.sendCallbackParam(id,"from_iframe",m);
+	} else if (this.parent) {
+		this.parent.postMessage({"uuid":DF_uuid,
+						         "dest":DF_parent_uuid, "id":id,
+								 "fn":evt, "p":params
+								}, "*");
+	} else if (m.dest == DF_uuid && m.uuid == DF_parent_uuid) { // from parent
+		this._dispatch(m.fn,m.p);
+	}
 };
 
 DeFramed.prototype._setupListeners = function(){
@@ -122,27 +147,32 @@ DeFramed.prototype._setupWebsocket = function(){
 		var m = msgpack.decode(event.data);
 		var action = m[0];
 		m = m[1];
-		if (self.debug) console.log("IN",action,m);
-		var p = self["msg_"+action];
-		if (p === undefined) {
-			self.announce("warning",`Unknown message type '${action}'`);
-		} else {
-			try {
-				p.call(self,m);
-				if (self.backoff < 200) { self.backoff = self.backoff / 2; }
-			} catch(e) {
-				if (self.debug) console.log(e);
-				self.announce("warning",`Message '${action}' caused error ${e}`)
-			}
-		}
+		self._dispatch(action,m);
 	};
+		
 
 	this.ws.onopen = function (msg) {
 		$("#df_spinner").show();
 		self.announce("danger");
-		self.send("first", {"uuid":self.uuid, "token":self.token, "version":window.deframed_version});
+		self.send("setup", {"uuid":self.uuid, "token":self.token, "version":window.deframed_version});
 		self.announce("info",'Talking to the server. Stand by.');
 	};
+};
+
+DeFramed.prototype._dispatch = function(action,m) {
+	if (this.debug) console.log("IN",action,m);
+	var p = this["msg_"+action];
+	if (p === undefined) {
+		this.announce("warning",`Unknown message type '${action}'`);
+	} else {
+		try {
+			p.call(this,m);
+			if (this.backoff < 200) { this.backoff = this.backoff / 2; }
+		} catch(e) {
+			if (this.debug) console.log(e);
+			this.announce("warning",`Message '${action}' caused error ${e}`)
+		}
+	}
 };
 
 DeFramed.prototype.send = function(action,data) {
@@ -171,7 +201,14 @@ DeFramed.prototype.msg_req = function(data) {
 	}
 };
 
-DeFramed.prototype.msg_first = function(m) {
+DeFramed.prototype.msg_to_iframe = function(m) { // dest evt params
+	var d = this.iframes[m[0]];
+	d.contentWindow.postMessage({"uuid":DF_uuid, "dest":m[0],
+							     "fn":m[1], "p":m[2]
+							    }, "*");
+};
+
+DeFramed.prototype.msg_setup = function(m) {
 	this.version = m.version;
 	this.uuid = m.uuid;
 	sessionStorage.setItem('token', m.token);
@@ -186,6 +223,45 @@ DeFramed.prototype.msg_reload = function(m) {
 DeFramed.prototype.msg_info = function(m) {
 	this.announce(m.level, m.text, m.timeout);
 	this.msg_busy(m.busy);
+}
+
+DeFramed.prototype.msg_add_class = function(m) {
+	var id = m.shift();
+	var cl = document.getElementById(id).classList;
+	for (var c in m)
+		cl.add(c);
+}
+
+DeFramed.prototype.msg_remove_class = function(m) {
+	var id = m.shift();
+	var cl = document.getElementById(id).classList;
+	for (var c in m)
+		cl.remove(c);
+}
+
+DeFramed.prototype.msg_load_style = function(m) {
+	var id = m.shift()
+	m = m[0];
+	if (!document.getElementById(id))
+	{
+		var head  = document.getElementsByTagName('head')[0];
+		var link  = document.createElement('link');
+		link.id   = id;
+		link.rel  = 'stylesheet';
+		link.type = 'text/css';
+		link.href = m;
+		link.media = 'all';
+		head.appendChild(link);
+	}
+}
+
+DeFramed.prototype.msg_set_attr = function(m) {
+	var e = document.getElementById(m[0]);
+	m = m[1];
+	Object.keys(m).forEach(k => {
+		e.setAttribute(k,m[k]);
+	}
+	);
 }
 
 DeFramed.prototype.msg_fatal = function(m) {
@@ -222,6 +298,16 @@ DeFramed.prototype.req_ping = function(m) {
 	return t;
 }
 
+DeFramed.prototype.req_elem_info = function(m) {
+	var e = document.getElementById(m);
+	if (e === null)
+		return null;
+	return { 'height':e.scrollHeight
+			, 'width':e.scrollWidth
+			, 'view':e.getBoundingClientRect().toJSON()
+			};
+}
+
 DeFramed.prototype.msg_ping = function(m) {
 	sessionStorage.setItem('token', m);
 	this.token = m;
@@ -241,22 +327,23 @@ DeFramed.prototype.msg_set = function(m) {
 		$(id).html(m);
 }
 
-
-DeFramed.prototype.req_getattr = function(m) {
+DeFramed.prototype.req_get_attr = function(m) {
 	res = []
 
 	Object.keys(m).forEach(k => {
 		var v = m[k];
-		var r = {};
 		var e = document.getElementById(k);
-		if (e === undefined) {
+		if (e === undefined)
 			res.push(null);
-		} else {
-			for(var kk of v) {
-				r[kk] = e.getAttribute(kk);
-			}
+		else if(!e.hasAttributes)
+			res.push({});
+		else {
+			var r = {};
+			var attrs = e.attributes;
+			for(var i = attrs.length - 1; i >= 0; i--) 
+				r[attrs[i].name] = attrs[i].value;
+			res[k] = r;
 		}
-		res[k] = r;
 	});
 	return res;
 }
@@ -306,9 +393,10 @@ DeFramed.prototype._elementActivated = function(action,ele){
 	this.send(action, this._getActionURL(ele));
 };
 
-DeFramed.prototype.msg_remi_update = function(m) {
-	var content = m[1];
-	var focusedElement=-1;
+DeFramed.prototype.msg_elem = function(m) {
+	var elem = document.getElementById(m[0]);
+	m = m[1];
+	var focusedElement=null;
 	var caretStart=-1;
 	var caretEnd=-1;
 	if (document.activeElement) {
@@ -318,24 +406,25 @@ DeFramed.prototype.msg_remi_update = function(m) {
 			caretEnd = document.activeElement.selectionEnd;
 		} catch(e) {}
 	}
-	var elem = document.getElementById(m[0]);
-	try {
-		elem.insertAdjacentHTML('afterend',decodeURIComponent(m[1]));
+	//try {
+		elem.insertAdjacentHTML('afterend',m);
 		elem.parentElement.removeChild(elem);
-	} catch(e) {
-		/*Microsoft EDGE doesn't support insertAdjacentHTML for SVGElement*/
-		var ns = document.createElementNS("http://www.w3.org/2000/svg",'tmp');
-		ns.innerHTML = decodeURIComponent(m[1]);
-		elem.parentElement.replaceChild(ns.firstChild, elem);
-	}
+	//} catch(e) {
+		///*Microsoft EDGE doesn't support insertAdjacentHTML for SVGElement*/
+		//var ns = document.createElementNS("http://www.w3.org/2000/svg",'tmp');
+		//ns.innerHTML = m;
+		//elem.parentElement.replaceChild(ns.firstChild, elem);
+	//}
 
-	var elemToFocus = document.getElementById(focusedElement);
-	if (elemToFocus != null) {
-		elemToFocus.focus();
-		try {
-			elemToFocus = document.getElementById(focusedElement);
-			if(caretStart>-1 && caretEnd>-1) elemToFocus.setSelectionRange(caretStart, caretEnd);
-		} catch(e) {}
+	if (focusedElement) {
+		var elemToFocus = document.getElementById(focusedElement);
+		if (elemToFocus != null) {
+			elemToFocus.focus();
+			try {
+				elemToFocus = document.getElementById(focusedElement);
+				if(caretStart>-1 && caretEnd>-1) elemToFocus.setSelectionRange(caretStart, caretEnd);
+			} catch(e) {}
+		}
 	}
 }
 
@@ -343,16 +432,42 @@ DeFramed.prototype.req_eval = function(m) {
 	return eval(m);
 }
 
+// remi support
+DeFramed.prototype.sendCallback = function(id,evt) {
+	this.sendCallbackParam(id,evt,null);
+}
+
+DeFramed.prototype.sendCallbackParam = function(id,evt,params) {
+	if (this.parent)
+		this.parent.postMessage({"a":"call", "uuid":DF_uuid,
+						         "dest":DF_parent_uuid, "id":id,
+								 "fn":evt, "p":params
+								}, "*");
+	else
+		this.send("remi_event",[id,evt,params]);
+}
+
 $(function() {
 	window.DF = new DeFramed();
+	window.remi = window.DF; // remi support
 	$("#init_alert").remove();
 
 	$("a").attr("draggable",false);
-	$(window).on('resize',function(){
+
+	// This is a simple handler to scale the main area so that header
+	// and footer don't obscure the main area.
+	// TODO: use a ResizeObserver to handle changes to header and footer height.
+	$(window).on('resize',function(evt) {
 		var hh = $('header').height();
+		var hb = $('body').height();
+		var hf = $('footer').height();
+		var wb = $('body').width();
+		if (!(hh >= 0)) hh = 0;
+		if (!(hf >= 0)) hf = 0;
 		$('main').offset({top:hh, left:0});
-		hh = $('body').height()-hh-$('footer').height();
-		$('main').height(hh);
+		var hm = hb-hh-hf; // height for main area
+		$('main').height(hm);
+		DF.send('size',{'height':hb,'width':wb,'header':hh,'footer':hf})
 	});
 	$(window).trigger('resize');
 })
