@@ -93,7 +93,7 @@ class Talker:
             s.shield = True
             try:
                 if self.w:
-                    await self._send("danger",msg)
+                    await self._send(["info",["danger",msg]])
             except Exception:
                 logger.exception("Terminal message")
                 pass
@@ -138,11 +138,10 @@ class Talker:
         if isinstance(self.w, trio.Event):
             await self.w.wait()
         while True:
-            action,data = await send_q.receive()
-            await self._send(action,data)
+            data = await send_q.receive()
+            await self._send(data)
 
-    async def _send(self, action, data):
-        data = [action,data]
+    async def _send(self, data):
         logger.debug("OUT %r",data)
         data = pack(data)
         await self.ws.send(data)
