@@ -17,6 +17,8 @@ import logging
 logger = logging.getLogger(__name__)
 
 async def _spawn(task, *args, task_status=trio.TASK_STATUS_IGNORED):
+    processing.set(None)
+
     with trio.CancelScope() as sc:
         task_status.started(sc)
         await task(*args)
