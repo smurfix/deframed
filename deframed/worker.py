@@ -741,8 +741,11 @@ class Worker(BaseWorker):
                 data.update(kw)
             else:
                 data = kw
+        args = [action,n,data]
+        if var is not None:
+            args.append(var)
         try:
-            await super().send(["req",[action,n,data]])
+            await super().send(["req",args])
             await evt.wait()
         except BaseException:
             self._req.pop(n)

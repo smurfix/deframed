@@ -13,6 +13,7 @@ var DeFramed = function(){
 	this.debug = sessionStorage.getItem('debug');
 	this.reconnect_timer = null;
 	this._setupListeners();
+	this.vars = {};
 
 	this.iframes = {};
 
@@ -137,7 +138,11 @@ DeFramed.prototype._setupWebsocket = function(){
 
 	this.ws.onerror = function (event) {
 		if (self.debug) console.log("WS ERR",event);
-		self.announce("danger","Connection error. Reconnecting soon.");
+		try {
+			self.announce("danger","Connection error. Reconnecting soon.");
+		} catch(e) {
+			debugger;
+		}
 		if(self.backoff < 30000) { self.backoff = self.backoff * 1.5; }
 		self.has_error = true;
 		self.reconnect_timer = setTimeout(self._setupWebsocket, self.backoff);
@@ -195,10 +200,16 @@ DeFramed.prototype.msg_req = function(data) {
 	var self = this;
 	var action=data[0];
 	var n=data[1];
+	var store = data[3];
 	data=data[2];
 
 	var r_ok = function(data) {
 		if (self.debug) console.log("OUT","reply",n,data);
+		if (store !== undefined) {
+			self.vars[store] = data;
+			data = { "_deframed_var": store };
+		}
+
 		self.ws.send(msgpack.encode(["reply",[n,data]]));
 	};
 	var r_err = function(error) {
@@ -449,7 +460,14 @@ DeFramed.prototype.req_eval = function(m) {
 	} else {
 		res = eval(m.str);
 		if (m.args !== undefined) {
-			res = res(... m.args);
+			var args = [];
+			for (var c of m.args) {
+				if (c._deframed_var !== undefined) {
+					c = this.vars[c._deframed_var];
+				}
+				args.push(c);
+			}
+			res = res(... args);
 		}
 	}
 	return res;
