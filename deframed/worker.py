@@ -37,10 +37,17 @@ class ClientError(RuntimeError):
         self.args = kw
 
     def __repr__(self):
-        return 'ClientError(%r,%r)' % (self.error, self.args)
+        try:
+            return 'ClientError(%r,%r)' % (self.error, self.args)
+        except Exception as exc:
+            return  'ClientError(??)'
 
     def __str__(self):
-        return 'ClientError(%s%s)' % (self.error, "".join(" %s=%r" % (k,v) for k,v in self.args.items()))
+        try:
+            return 'ClientError(%s%s)' % (self.error, " ".join(str(x) for x in self.args))
+        except Exception as exc:
+            return  'ClientError(??)'
+
 
 
 _talk_id = 0
