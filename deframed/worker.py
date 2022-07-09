@@ -101,7 +101,7 @@ class Talker:
             s.shield = True
             try:
                 if self.w:
-                    await self._send(["info",["danger",msg]])
+                    await self._send(["info",dict(level="warning", text=msg)])
             except Exception:
                 logger.exception("Terminal message")
                 pass
