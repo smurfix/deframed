@@ -86,7 +86,8 @@ class Talker:
         finally:
             with trio.fail_after(2) as sc:
                 sc.shield=True
-                await self.w.maybe_disconnect(self)
+                if self.w is not None:
+                    await self.w.maybe_disconnect(self)
 
     async def died(self, msg):
         """
