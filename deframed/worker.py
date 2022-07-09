@@ -695,9 +695,9 @@ class Worker(BaseWorker):
             return res
 
     async def _monitor(self, *, task_status=trio.TASK_STATUS_IGNORED):
-        self._kill_wait = trio.Event()
+        self._kill_flag = trio.Event()
         task_status.started()
-        await self._kill_wait.wait()
+        await self._kill_flag.wait()
         raise RuntimeError("Global task died") from self._kill_exc
 
     async def _run(self, proc, *args, task_status=trio.TASK_STATUS_IGNORED):
@@ -717,7 +717,8 @@ class Worker(BaseWorker):
                     task_status.started(res)
             except Exception as exc:
                 self._kill_exc = exc
-                self._kill_flag.set()
+                if self._kill_flag is not None:
+                    self._kill_flag.set()
             finally:
                 self._persistent_nursery = None
 
