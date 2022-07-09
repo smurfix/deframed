@@ -303,6 +303,7 @@ class Worker(BaseWorker):
         super().__init__(*a,**k)
         self._n = 1
         self._req = {}
+        self.main_showing = trio.Event()
 
     async def data_in(self, data):
         """
@@ -352,6 +353,11 @@ class Worker(BaseWorker):
         else:
             return await self._nursery.start(_spawn,task,*args)
 
+    async def _talk(self):
+        # wait for show_main before talking
+        await self.main_showing.wait()
+        await super()._talk()
+
     async def get_attr(self, **a: Dict[str,List[str]]) -> Dict[str,Optional[List[str]]]:
         """
         Returns a list of attributes for some element.
@@ -391,7 +397,7 @@ class Worker(BaseWorker):
 
         uuid = data.get('uuid')
         if uuid is None or not self.set_uuid(uuid):
-            await self.show_main(token=data['token'])
+            await self.show_main(token=data.get('token', None))
         else:
             return True
 
@@ -739,9 +745,10 @@ class Worker(BaseWorker):
         sent the last Ping, assuming that you didn't subsequently change
         anything).
 
-        This method may run concurrently with `talk`.
+        This method triggers starting your "talk" method, so you should
+        call super() as soon as you have completed setup.
         """
-        pass
+        self.main_showing.set()
 
     def set_uuid(self, uuid:UUID) -> bool:
         """

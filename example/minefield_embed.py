@@ -286,6 +286,7 @@ class MyApp(RemiSupport, Worker):
         await self.h.show()
         await self.busy(False)
         await self.alert("info",None)
+        await super().show_main()
 
 
 async def main():

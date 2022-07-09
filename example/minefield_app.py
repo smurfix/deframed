@@ -282,6 +282,7 @@ class MyApp(Worker):
         self.w = Minefield(self)
         await self.w.show(width=800,height=500, name=self.w.title)
         await self.busy(False)
+        await super().show_main()
 
 
 async def main():
