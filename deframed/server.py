@@ -44,8 +44,11 @@ class App:
         @self.app.route("/", defaults={"p":None}, methods=['GET'])
         async def index(p):
             # "path" is unused, the app will get it via Javascript
-            mainpage = os.path.join(os.path.dirname(deframed.__file__), cfg.mainpage)
-            with open(mainpage, 'r') as f:
+            try:
+                f = open(cfg.mainpage)
+            except OSError:
+                f = open(os.path.join(os.path.dirname(deframed.__file__), cfg.mainpage))
+            with f:
                 data = cfg.data.copy()
 
                 data['debug'] = self.debug
@@ -83,7 +86,10 @@ class App:
         @self.app.route("/static/<path:filename>", methods=['GET'])
         async def send_static(filename):
             print("GET",filename)
-            return await send_from_directory(static, filename)
+            try:
+                return await send_from_directory(static, filename)
+            except NotFound:
+                return await send_from_directory(os.path.join(os.path.dirname(deframed.__file__),"static"), filename)
 
     def route(self,*a,**k):
         return self.app.route(*a,**k)
