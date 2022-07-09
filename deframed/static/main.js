@@ -443,7 +443,16 @@ DeFramed.prototype.msg_elem = function(m) {
 }
 
 DeFramed.prototype.req_eval = function(m) {
-	return eval(m);
+	var res;
+	if (typeof m === 'string') {
+		res = eval(m);
+	} else {
+		res = eval(m.str);
+		if (m.args !== undefined) {
+			res = res(... m.args);
+		}
+	}
+	return res;
 }
 
 // remi support

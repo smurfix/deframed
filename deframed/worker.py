@@ -685,12 +685,40 @@ class Worker(BaseWorker):
 
         await super().send([action,data])
 
-    async def request(self, action:str, data:Any=None, **kw):
+    async def eval(self, fn:str, args:tuple=None, var:str=None, post:list=None):
         """
-        Send a request to the client, await+return the reply
+        Evaluate a Javascript snippet on the client.
+
+        If @args is set, the snippet is interpreted as a function, and called with the supplied arguments.
+
+        If @var is set, the result is stored on the client and a proxy object is returned.
+
+        If the reply is a promise, it is delayed until the promuise is resolved.
+
+        Errors are re-raised as `ClientError`.
+        """
+        req = {"str": fn}
+        if args is not None:
+            req["args"] = args
+        res = await self.request("eval", req, var=var, post=post)
+
+        if var is not None:
+            return {"_eval":res}
+        else:
+            return res
+
+    async def request(self, action:str, data:Any=None, var:str=None, **kw):
+        """
+        Send a request to the client, await+return the reply.
+
+        If @var is set, the result is stored on the client and a proxy object is returned.
+
+        If the reply is a promise, the reply is delayed until the promuise is resolved.
+
+        Errors are re-raised as `ClientError`.
         """
         if processing.get():
-            raise RuntimeError("You cannot call this from within the receiver",processing.get())
+            raise RuntimeError("You cannot call this from within the receiver. Use a task.",processing.get())
 
         self._n += 1
         n = self._n
