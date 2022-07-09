@@ -12,11 +12,11 @@ __all__ = ["pack", "unpack", #"stream_unpacker"
         ]
 
 # single message packer
-pack = msgpack.Packer(strict_types=False, use_bin_type=True).pack
+pack = msgpack.Packer().packb
 
 # single message unpacker
 unpack = partial(
-    msgpack.unpackb, object_pairs_hook=attrdict, raw=False, use_list=False
+    msgpack.unpackb, object_hook=attrdict, use_list=False
 )
 
 ## stream unpacker factory
