@@ -237,7 +237,7 @@ class _RemiWorker(_Remi, SubWorker):
         super().cancel()
 
     def close(self):
-        """ Called by the server when the App have to be terminated
+        """ Called by the server when the App has to be terminated
         """
         self._stop_update_flag = True
         self._talker.cancel()
