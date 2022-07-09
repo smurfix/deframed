@@ -7,7 +7,7 @@
 var DeFramed = function(){
 	this.has_error = false;
 	this.token = sessionStorage.getItem('token');
-	if (this.token === undefined) this.token = null;
+	if (this.token === undefined || this.token == "undefined") this.token = null;
 	this.version = null;
 	this.backoff = 100;
 	this.debug = sessionStorage.getItem('debug');
