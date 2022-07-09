@@ -7,8 +7,8 @@ from hypercorn.config import Config as HyperConfig
 from hypercorn.trio import serve as hyper_serve
 from quart.logging import create_serving_logger
 from quart import jsonify, websocket, Response
-from quart.exceptions import NotFound
-from quart.static import send_from_directory
+from werkzeug.exceptions import NotFound
+from quart.helpers import send_from_directory
 from weakref import WeakValueDictionary
 import chevron
 
