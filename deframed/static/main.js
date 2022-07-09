@@ -1,10 +1,27 @@
-// requires: msgpack https://github.com/ygoe/msgpack.js/
-//                   https://github.com/kawanet/msgpack-lite
-//           cash https://github.com/fabiospampinato/cash
+// requires: msgpack https://unpkg.com/@msgpack/msgpack
 //
 'use strict';
 
+var TextEnc = new TextEncoder();
+var TextDec = new TextDecoder();
+
+var ExtCodec = new MessagePack.ExtensionCodec();
+ExtCodec.register({
+	type: 4,
+	encode: function(input, context) {
+		if (input._deframed_var === undefined) {
+			return null;
+		}
+		return TextEnc.encode(input._deframed_var);
+	},
+	decode: function(data, extType, context) {
+		data = TextDec(data);
+		return context[data];
+	},
+});
+
 var DeFramed = function(){
+	self = this;
 	this.has_error = false;
 	this.token = sessionStorage.getItem('token');
 	if (this.token === undefined || this.token == "undefined") this.token = null;
@@ -24,6 +41,15 @@ var DeFramed = function(){
 		this.parent = null;
 		this._setupWebsocket();
 	}
+
+}
+
+DeFramed.prototype.msg_encode = function(data) {
+	return MessagePack.encode(data, { extensionCodec: ExtCodec, context: this.vars })
+}
+
+DeFramed.prototype.msg_decode = function(data) {
+	return MessagePack.decode(data, { extensionCodec: ExtCodec, context: this.vars })
 }
 
 DeFramed.prototype.receiveMessage = function(event) {
@@ -149,7 +175,7 @@ DeFramed.prototype._setupWebsocket = function(){
 	};
 
 	this.ws.onmessage = function(event){
-		var m = msgpack.decode(event.data);
+		var m = self.msg_decode(event.data);
 		var action = m[0];
 		m = m[1];
 		self._dispatch(action,m);
@@ -185,7 +211,7 @@ DeFramed.prototype.send = function(action,data) {
 	if(action == "reply") {
 		if (this.debug) console.log("You can't reply here",data);
 	} else {
-		data = msgpack.encode([action,data]);
+		data = this.msg_encode([action,data]);
 		try {
 			if (this.ws) {
 				this.ws.send(data);
@@ -210,11 +236,11 @@ DeFramed.prototype.msg_req = function(data) {
 			data = { "_deframed_var": store };
 		}
 
-		self.ws.send(msgpack.encode(["reply",[n,data]]));
+		self.ws.send(self.msg_encode(["reply",[n,data]]));
 	};
 	var r_err = function(error) {
 		if (self.debug) console.log("OUT","reply",n,error,data);
-		self.ws.send(msgpack.encode(["reply",[n,{"_error":error+'', "action":action, "n":n, "data":data}]]));
+		self.ws.send(self.msg_encode(["reply",[n,{"_error":error+'', "action":action, "n":n, "data":data}]]));
 	}
 	try {
 		data=this["req_"+action](data);

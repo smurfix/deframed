@@ -7,7 +7,7 @@ from uuid import uuid1,UUID
 import trio
 from collections.abc import Mapping
 from typing import Optional,Dict,List,Union,Any
-from .codec import pack, unpack
+from .util import packer, unpacker
 from functools import partial
 
 from contextvars import ContextVar
@@ -130,7 +130,7 @@ class Talker:
         while True:
             data = await self.ws.receive()
             try:
-                data = unpack(data)
+                data = unpacker(data)
             except TypeError:
                 logger.error("IN X %r",data)
                 raise
@@ -151,7 +151,7 @@ class Talker:
 
     async def _send(self, data):
         logger.debug("OUT %r",data)
-        data = pack(data)
+        data = packer(data)
         await self.ws.send(data)
 
     async def send(self, data:Any):

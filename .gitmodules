@@ -1,0 +1,3 @@
+[submodule "deframed/util"]
+	path = deframed/util
+	url = https://github.com/smurfix/util-py.git
