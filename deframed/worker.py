@@ -160,7 +160,7 @@ class BaseWorker:
 
     The talker's read loop calls :meth:`data_in` with the incoming message.
     """
-    _talk = None
+    _talker = None
     _scope = None
     _nursery = None
 
@@ -188,9 +188,9 @@ class BaseWorker:
 
         The worker's previous websocket is cancelled.
         """
-        if self._talk is not None:
-            self._talk.cancel()
-        self._talk = talker
+        if self._talker is not None:
+            self._talker.cancel()
+        self._talker = talker
         talker.attach(self)
 
     async def _monitor(self, *, task_status=trio.TASK_STATUS_IGNORED):
@@ -219,7 +219,7 @@ class BaseWorker:
                 with trio.CancelScope() as sc:
                     self._scope = sc
                     try:
-                        await self.talk()
+                        await self._talk()
                     finally:
                         self._scope = None
         except Exception:
@@ -230,6 +230,8 @@ class BaseWorker:
         else:
             await t.died(self.fatal_msg)
 
+    async def _talk(self):
+        await self.talk()
 
     async def talk(self):
         """
@@ -260,7 +262,7 @@ class BaseWorker:
 
     async def maybe_disconnect(self, talker):
         """internal method, called by the Talker"""
-        if self._talk is talker:
+        if self._talker is talker:
             logger.debug("DISCONNECT")
             await self.disconnect()
 
@@ -275,7 +277,7 @@ class BaseWorker:
         """
         Send a message to the client.
         """
-        await self._talk.send(data)
+        await self._talker.send(data)
 
     async def data_in(self, data):
         """
@@ -762,7 +764,7 @@ class Worker(BaseWorker):
             self.uuid = uuid
             return False
         else:
-            w.attach(self._talk)
+            w.attach(self._talker)
             self.cancel(True)
             return True
 

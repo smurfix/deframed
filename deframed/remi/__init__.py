@@ -240,7 +240,7 @@ class _RemiWorker(_Remi, SubWorker):
         """ Called by the server when the App have to be terminated
         """
         self._stop_update_flag = True
-        self._talk.cancel()
+        self._talker.cancel()
         self.cancel()
 
 
