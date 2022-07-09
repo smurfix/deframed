@@ -181,23 +181,39 @@ DeFramed.prototype.send = function(action,data) {
 		if (this.debug) console.log("You can't reply here",data);
 	} else {
 		data = msgpack.encode([action,data]);
-		if (this.ws) {
-			this.ws.send(data);
+		try {
+			if (this.ws) {
+				this.ws.send(data);
+			}
+		} catch(e) {
+			console.log("Send failed",action,data);
 		}
 	}
 };
 
 DeFramed.prototype.msg_req = function(data) {
+	var self = this;
 	var action=data[0];
 	var n=data[1];
 	data=data[2];
+
+	var r_ok = function(data) {
+		if (self.debug) console.log("OUT","reply",n,data);
+		self.ws.send(msgpack.encode(["reply",[n,data]]));
+	};
+	var r_err = function(error) {
+		if (self.debug) console.log("OUT","reply",n,error,data);
+		self.ws.send(msgpack.encode(["reply",[n,{"_error":error+'', "action":action, "n":n, "data":data}]]));
+	}
 	try {
 		data=this["req_"+action](data);
-		if (this.debug) console.log("OUT","reply",n,data);
-		this.ws.send(msgpack.encode(["reply",[n,data]]));
+		if (data.then !== undefined) {
+			data.then(r_ok).then(undefined, r_err);
+			return;
+		}
+		r_ok(data);
 	} catch(e) {
-		if (this.debug) console.log("OUT","reply",n,e,data);
-		this.ws.send(msgpack.encode(["reply",[n,{"_error":e, "action":action, "n":n, "data":data}]]));
+		r_err(e);
 	}
 };
 
