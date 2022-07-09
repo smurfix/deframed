@@ -181,6 +181,10 @@ class BaseWorker:
         self.uuid = uuid1()
         app.clients[self.uuid] = self
 
+    @property
+    def app(self):
+        return self._app
+
     async def init(self):
         """
         Setup code. Called by the server for async initialization.
