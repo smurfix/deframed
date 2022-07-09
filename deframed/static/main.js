@@ -291,7 +291,7 @@ DeFramed.prototype.msg_debug = function(m) {
 	sessionStorage.setItem('debug', this.debug);
 }
 
-DeFramed.prototype.req_ping = function(m) {
+DeFramed.prototype.req_token = function(m) {
 	t = this.token;
 	sessionStorage.setItem('token', m);
 	this.token = m;
@@ -309,8 +309,6 @@ DeFramed.prototype.req_elem_info = function(m) {
 }
 
 DeFramed.prototype.msg_ping = function(m) {
-	sessionStorage.setItem('token', m);
-	this.token = m;
 	this.send("pong",m);
 }
 

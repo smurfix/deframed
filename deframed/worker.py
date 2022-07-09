@@ -598,37 +598,56 @@ class Worker(BaseWorker):
         """
         await self.send("debug", val)
 
-    async def ping(self, token: str, wait: bool = False) -> Optional[str]:
+    async def set_token(self, token):
         """
-        Send a 'ping' to the client. Echoed back by calling :meth:`msg_pong`.
-
-        If you set ``wait``, the call is synchronous. The client returns
-        the token's previous value.
-
-        If you do not set ``wait``, the call returns immediately. The client
-        sends a ``pong`` message back; the content is the current (not the
-        previous) token.
+        Send a token to the client. The token represents the client's current state;
+        it will send it in its `setup` message if/when it reconnects.
 
         Args:
           token:
-            Anything packable, but should probably be a string.
-          wait:
-            Flag whether this call should be synchronous.
-        """
-        if wait:
-            return await self.request("ping", token)
-        else:
-            await self.send("ping", token)
+            Anything packable.
+        Returns:
+          the previous token, or `None`.
 
-    async def msg_pong(self, data: Any):
+        Security announcement: For anything nontrivial, you should store the actual
+        data on the server and use a random string as token.
+
+        There is no `get_token`. This is intentional.
+
         """
-        Called by the client, sometime after you ping it asynchronously.
+        return await self.request("token", token)
+
+    async def ping(self, data: str) -> Optional[str]:
+        """
+        Send a 'ping' to the client, which reacts by calling `msg_pong`.
 
         Args:
           data:
-            the token value you sent with :meth:`send_ping`.
+            Anything.
+
+        This call does *not* wait for the client's reply or call to `msg_pong`.
+        """
+        await self.send("ping", data)
+
+    async def msg_pong(self, data: Any):
+        """
+        Called by the client, sometime after you ping it.
+
+        Args:
+          data:
+            the value you sent with :meth:`ping`.
         """
         pass
+
+    async def msg_ping(self, data: Any):
+        """
+        May be called by the client to ensure the connecton is still up.
+
+        Args:
+          data:
+            Whatever.
+        """
+        await self.request("pong", data)
 
     async def msg_size(self, evt):
         """

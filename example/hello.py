@@ -24,20 +24,21 @@ class Work(Worker):
             await self.modal_hide()
         if token is None or token == "A0":
             await self.debug(True)
-            await self.put_form(ping=False)
+            await self.put_form(set_token=False)
         elif token == "A1":
-            await self.put_button(ping=False)
+            await self.put_button(set_token=False)
         elif token == "A2":
-            await self.put_modal(ping=False)
+            await self.put_modal(set_token=False)
         elif token == "A3":
-            await self.put_done(ping=False)
+            await self.put_done(set_token=False)
         else:
             await self.alert("warning", "The token was "+repr(token), id="bad_token", timeout=10)
             await self.put_form()
         await self.alert("info", None)
         await self.busy(False)
+        await super().show_main()
 
-    async def put_form(self, ping=True):
+    async def put_form(self, set_token=True):
         await self.set_content("df_footer_left", "'Hello' demo example")
         await self.set_content("df_footer_right", "via DeFramed, the non-framework")
         await self.set_content("df_main", """
@@ -64,26 +65,26 @@ First, here's a simple form.
         await self.set_content("plugh", fw(f))
 
         await self.alert("info","Ready!", busy=False, timeout=2)
-        if ping:
-            await self.ping("A0")
+        if set_token:
+            await self.set_token("A0")
 
-    async def put_button(self,ping=True):
+    async def put_button(self,set_token=True):
         await self.set_content("df_main", "<p>Success. Next, here's a button. <button id=\"butt1\" class=\"btn btn-dark\">Do it!</button></p>")
-        await self.ping("A1")
+        await self.set_token("A1")
 
-    async def put_modal(self,ping=True):
+    async def put_modal(self,set_token=True):
         await self.set_content("df_main", "<p>We're showing a modal so you don't see this.</p>")
         await self.set_content("df_modal_title", "Random Title")
         await self.set_content("df_modal_body", "<p>Random content</p>")
         await self.set_content("df_modal_footer", '<button type="button" id="bt_m" class="btn btn-primary">Click Me</button>')
         await self.modal_show(keyboard=False)
-        if ping:
-            await self.ping("A2")
+        if set_token:
+            await self.set_token("A2")
 
-    async def put_done(self,ping=True):
+    async def put_done(self,set_token=True):
         await self.set_content("df_main", "<p>Aww … you pressed the button!</p>")
-        if ping:
-            await self.ping("A3")
+        if set_token:
+            await self.set_token("A3")
 
 
     async def form_form1(self, **kw):
