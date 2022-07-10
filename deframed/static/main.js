@@ -419,7 +419,7 @@ DeFramed.prototype._augmentButton = function(ele){
 	if(ele.onclick || !ele.id) { // already done
 		return;
 	}
-	console.log('augmenting button: ', ele);
+	if(this.debug) console.log('augmenting button: ', ele);
 	let self = this;
 	ele.onclick = function(){
 		self.send("button",ele.id);
@@ -430,7 +430,7 @@ DeFramed.prototype._augmentForm = function(ele){
 	if(ele.onsubmit || !ele.id) { // already done
 		return;
 	}
-	console.log('augmenting form: ', ele);
+	if(this.debug) console.log('augmenting form: ', ele);
 	let self = this;
 	ele.onsubmit = function(){
 		var res = {};
@@ -445,7 +445,7 @@ DeFramed.prototype._augmentForm = function(ele){
 };
 
 DeFramed.prototype._elementActivated = function(action,ele){
-	console.log('element activated:', ele);
+	if(this.debug) console.log('element activated:', ele);
 	this.send(action, this._getActionURL(ele));
 };
 
