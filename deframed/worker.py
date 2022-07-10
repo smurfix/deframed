@@ -44,7 +44,7 @@ class ClientError(RuntimeError):
 
     def __str__(self):
         try:
-            return 'ClientError(%s%s)' % (self.error, " ".join(str(x) for x in self.args))
+            return 'ClientError(%r %s)' % (self.error, " ".join(str(x) for x in self.args))
         except Exception as exc:
             return  'ClientError(??)'
 
