@@ -7,7 +7,7 @@ from uuid import uuid1,UUID
 import trio
 from collections.abc import Mapping
 from typing import Optional,Dict,List,Union,Any
-from .util import packer, unpacker
+from .util import packer, unpacker, Proxy
 from functools import partial
 
 from contextvars import ContextVar
@@ -697,27 +697,55 @@ class Worker(BaseWorker):
 
         await super().send([action,data])
 
-    async def eval(self, fn:str, args:tuple=None, var:str=None, post:list=None):
+    async def eval(self, obj:Proxy, attr:tuple=None, args:tuple=None, var:Union[str,Proxy]=None):
         """
-        Evaluate a Javascript snippet on the client.
+        Call a Javascript function on the client. Take an object, access a sequence
+        of attributes, call the result with the supplied arguments.
 
-        If @args is set, the snippet is interpreted as a function, and called with the supplied arguments.
+        The object may be either a proxy or a global object, expressed as either
+        a dottified path or a tuple.
 
         If @var is set, the result is stored on the client and a proxy object is returned.
 
-        If the reply is a promise, it is delayed until the promuise is resolved.
+        If the result is a promise, the reply is delayed until the promuise is resolved.
 
         Errors are re-raised as `ClientError`.
         """
-        req = {"str": fn}
+        if isinstance(obj,(tuple,list,str)):
+            if isinstance(obj,str):
+                obj = P(obj)
+            attr = obj+(attr or ())
+            obj = Proxy("_")
+        req = {"obj": obj}
+
         if args is not None:
             req["args"] = args
-        res = await self.request("eval", req, var=var, post=post)
-
+        if attr is not None:
+            req["attr"] = attr
         if var is not None:
-            return {"_eval":res}
+            if isinstance(var,Proxy):
+                var = var.name
+            req["var"] = var
+        return await self.request("eval", **req)
+
+    async def assign(self, obj:Proxy, path:tuple=(), value:Any=None):
+        """
+        Set an attribute on the client::
+
+            await worker.assign(Proxy("any"), path=P("foo.bar"), value=[1,2,3])
+
+        effectively runs ``ANY.foo.bar=[1,2,3]`` on the browser.
+            
+        If no path is given, the proxy itself is changed to the given value.
+
+        This call does not handle promises.
+        """
+        if path:
+            return await self.request("assign", obj=obj, dest=path[-1], val=value,
+                    **({"attr":path[:-1]} if len(path)>1 else {}))
         else:
-            return res
+            return await self.request("assign", var=obj, val=value)
+
 
     async def request(self, action:str, data:Any=None, var:str=None, **kw):
         """
@@ -743,6 +771,8 @@ class Worker(BaseWorker):
                 data = kw
         args = [action,n,data]
         if var is not None:
+            if isinstance(var, Proxy):
+                var = var.name
             args.append(var)
         try:
             await super().send(["req",args])

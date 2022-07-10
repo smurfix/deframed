@@ -29,7 +29,7 @@ var DeFramed = function(){
 	this.debug = sessionStorage.getItem('debug');
 	this.reconnect_timer = null;
 	this._setupListeners();
-	this.vars = {};
+	this.vars = { _: window };
 
 	this.iframes = {};
 
@@ -231,8 +231,14 @@ DeFramed.prototype.msg_req = function(data) {
 	var r_ok = function(data) {
 		if (self.debug) console.log("OUT","reply",n,data);
 		if (store !== undefined) {
-			self.vars[store] = data;
-			data = { "_deframed_var": store };
+			if(store == "") {
+				data = null;
+			} else if(store[0] == "_") {
+				throw new TypeError("cannot assign to internal proxies");
+			} else {
+				self.vars[store] = data;
+				data = { "_deframed_var": store };
+			}
 		}
 
 		self.ws.send(self.msg_encode(["reply",[n,data]]));
@@ -479,23 +485,35 @@ DeFramed.prototype.msg_elem = function(m) {
 }
 
 DeFramed.prototype.req_eval = function(m) {
-	var res;
-	if (typeof m === 'string') {
-		res = eval(m);
-	} else {
-		res = eval(m.str);
-		if (m.args !== undefined) {
-			var args = [];
-			for (var c of m.args) {
-				if (c._deframed_var !== undefined) {
-					c = this.vars[c._deframed_var];
-				}
-				args.push(c);
-			}
-			res = res(... args);
+	var res = m.obj;
+	if (m.attr !== undefined) {
+		for(let x of m.attr) {
+			res = res[x];
+		}
+	}
+	if (m.args !== undefined && m.args !== null) {
+		if (m.obj === window) {
+			res = res.apply(null, m.args);
+		} else {
+			res = res.apply(m.obj, m.args);
 		}
 	}
 	return res;
+}
+
+DeFramed.prototype.req_assign = function(m) {
+	var data = m.obj;
+	if (m.obj !== undefined) {
+		res = m.obj;
+		if (m.attr !== undefined) {
+			for(let x of m.attr) {
+				res = res[x];
+			}
+		}
+		res[m.dest] = m.val;
+		return null;
+	}
+	return m.val;
 }
 
 // remi support
