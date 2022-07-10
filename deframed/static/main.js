@@ -21,7 +21,6 @@ ExtCodec.register({
 });
 
 var DeFramed = function(){
-	self = this;
 	this.has_error = false;
 	this.token = sessionStorage.getItem('token');
 	if (this.token === undefined || this.token == "undefined") this.token = null;
@@ -70,7 +69,7 @@ DeFramed.prototype.receiveMessage = function(event) {
 };
 
 DeFramed.prototype._setupListeners = function(){
-	var self = this;
+	let self = this;
 
 	document.addEventListener('DOMContentLoaded', function() {
 		self._augmentInterface();
@@ -149,11 +148,11 @@ DeFramed.prototype.reconnect = function(){
 };
 
 DeFramed.prototype._setupWebsocket = function(){
+	let self = this;
 	var url = window.location.protocol.replace('http', 'ws') + '//' + window.location.host + '/ws';
 	this.ws = new WebSocket(url);
 	this.ws.binaryType = 'arraybuffer';
 	this.has_error = false;
-	var self = this;
 	if (this.debug) console.log("WS START",url);
 
 	this.ws.onclose = function(event){
@@ -171,7 +170,7 @@ DeFramed.prototype._setupWebsocket = function(){
 		}
 		if(self.backoff < 30000) { self.backoff = self.backoff * 1.5; }
 		self.has_error = true;
-		self.reconnect_timer = setTimeout(self._setupWebsocket, self.backoff);
+		self.reconnect_timer = setTimeout(function() { self._setupWebsocket(); }, self.backoff);
 	};
 
 	this.ws.onmessage = function(event){
@@ -223,7 +222,7 @@ DeFramed.prototype.send = function(action,data) {
 };
 
 DeFramed.prototype.msg_req = function(data) {
-	var self = this;
+	let self = this;
 	var action=data[0];
 	var n=data[1];
 	var store = data[3];
@@ -415,7 +414,7 @@ DeFramed.prototype._augmentButton = function(ele){
 		return;
 	}
 	console.log('augmenting button: ', ele);
-	var self = this;
+	let self = this;
 	ele.onclick = function(){
 		self.send("button",ele.id);
 	}
@@ -426,7 +425,7 @@ DeFramed.prototype._augmentForm = function(ele){
 		return;
 	}
 	console.log('augmenting form: ', ele);
-	var self = this;
+	let self = this;
 	ele.onsubmit = function(){
 		var res = {};
 		for(var e of ele.elements) {
