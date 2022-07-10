@@ -340,7 +340,10 @@ class Worker(BaseWorker):
     async def _reply(self, n, data):
         if isinstance(data,Mapping) and '_error' in data:
             data = ClientError(**data)
-        evt,self._req[n] = self._req[n],data
+        try:
+            evt,self._req[n] = self._req[n],data
+        except KeyError:
+            return  # stale or whatever
         evt.set()
 
     def cancel(self, persistent=False):
