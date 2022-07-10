@@ -15,7 +15,7 @@ ExtCodec.register({
 		return TextEnc.encode(input._deframed_var);
 	},
 	decode: function(data, extType, context) {
-		data = TextDec(data);
+		data = TextDec.decode(data);
 		return context[data];
 	},
 });
