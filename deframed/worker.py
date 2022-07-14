@@ -9,6 +9,7 @@ from collections.abc import Mapping
 from typing import Optional,Dict,List,Union,Any
 from .util import packer, unpacker, Proxy
 from functools import partial
+from pprint import pformat
 
 from contextvars import ContextVar
 processing = ContextVar("processing", default=None)
@@ -134,7 +135,7 @@ class Talker:
             except TypeError:
                 logger.error("IN X %r",data)
                 raise
-            logger.debug("IN %r",data)
+            logger.debug("IN %s",pformat(data))
             await self.w.data_in(data)
 
     async def ws_out(self, *, task_status=trio.TASK_STATUS_IGNORED):
@@ -150,9 +151,13 @@ class Talker:
             await self._send(data)
 
     async def _send(self, data):
-        logger.debug("OUT %r",data)
-        data = packer(data)
-        await self.ws.send(data)
+        try:
+            msg = packer(data)
+        except TypeError:
+            logger.exception("OUT F %s", pformat(data))
+            raise
+        logger.debug("OUT %s", pformat(data))
+        await self.ws.send(msg)
 
     async def send(self, data:Any):
         """
